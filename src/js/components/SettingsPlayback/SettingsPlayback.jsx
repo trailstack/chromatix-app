@@ -18,6 +18,7 @@ export const SettingsPlayback = () => {
       <RepeatSettings />
       <GaplessSettings />
       <ServerSettings />
+      <NotificationSettings />
     </>
   );
 };
@@ -135,6 +136,25 @@ const GaplessSettings = () => {
   ];
 
   return <SettingsList title="Gapless Playback" menuItems={menuItems} />;
+};
+
+//
+// NOTIFICATIONS
+//
+
+const NotificationSettings = () => {
+  const optionShowTrackNotification = useSelector(({ sessionModel }) => sessionModel.optionShowTrackNotification);
+
+  const menuItems = [
+    {
+      key: 'optionShowTrackNotification',
+      label: 'Show desktop notifications for new tracks.',
+      description: 'Displays a system notification with the song title, artist, and album art when a new track starts.',
+      state: optionShowTrackNotification,
+    },
+  ];
+
+  return <SettingsList title="Notifications" menuItems={menuItems} />;
 };
 
 // ======================================================================

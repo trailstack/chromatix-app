@@ -29,6 +29,9 @@ const playerState = {
   playerTrackLoaded: false,
   playerTrackError: false,
   playerInteractionCount: 0,
+
+  _lastNotifiedTrackId: null,
+  _lastNotificationTime: 0,
 };
 
 const state = Object.assign({}, playerState);
@@ -667,6 +670,8 @@ const effects = (dispatch) => ({
     });
     // log playback state to server
     bridge.logPlaybackPlay(currentTrack);
+    // show desktop notification for the new track
+    dispatch.playerModel.playerShowNotification({ track: currentTrack });
     // disable repeat once
     const disableRepeatOnceOnSourceChange = rootState.sessionModel.disableRepeatOnceOnSourceChange;
     if (disableRepeatOnceOnSourceChange) {
@@ -808,14 +813,22 @@ const effects = (dispatch) => ({
     const playingTrackIndex = rootState.sessionModel.playingTrackIndex;
     const playingRepeatAll = rootState.sessionModel.playingRepeatAll;
     const playingTrackCount = rootState.sessionModel.playingTrackCount;
+    const playingTrackKeys = rootState.sessionModel.playingTrackKeys;
+    const playingTrackList = rootState.sessionModel.playingTrackList;
     const currentTime = playerX.getCurrentProgress();
     // play previous track, if available
     if (playingTrackIndex > 0 && currentTime <= 5) {
+      const prevTrack = playingTrackList[playingTrackKeys[playingTrackIndex - 1]];
+      // show desktop notification
+      dispatch.playerModel.playerShowNotification({ track: prevTrack });
       dispatch.playerModel.playerLoadIndex({ index: playingTrackIndex - 1, play: true });
       analyticsEvent(toUpperFirst(currentService) + ' / Music / Previous Track');
     }
     // else play last track, if on repeat
     else if (playingRepeatAll && currentTime <= 5) {
+      const lastTrack = playingTrackList[playingTrackKeys[playingTrackCount - 1]];
+      // show desktop notification
+      dispatch.playerModel.playerShowNotification({ track: lastTrack });
       dispatch.playerModel.playerLoadIndex({ index: playingTrackCount - 1, play: true });
       analyticsEvent(toUpperFirst(currentService) + ' / Music / Previous Track');
     }
@@ -844,6 +857,9 @@ const effects = (dispatch) => ({
     } else {
       // play next track, if available
       if (playingTrackIndex < playingTrackCount - 1) {
+        const nextTrack = playingTrackList[playingTrackKeys[playingTrackIndex + 1]];
+        // show desktop notification
+        dispatch.playerModel.playerShowNotification({ track: nextTrack });
         dispatch.playerModel.playerLoadIndex({ index: playingTrackIndex + 1, play: true });
         if (payload === true) {
           analyticsEvent(toUpperFirst(currentService) + ' / Music / Next Track (Auto)');
@@ -853,6 +869,9 @@ const effects = (dispatch) => ({
       }
       // else play first track, if on repeat all
       else if (playingRepeatAll) {
+        const firstTrack = playingTrackList[playingTrackKeys[0]];
+        // show desktop notification
+        dispatch.playerModel.playerShowNotification({ track: firstTrack });
         dispatch.playerModel.playerLoadIndex({ index: 0, play: true });
         if (payload === true) {
           analyticsEvent(toUpperFirst(currentService) + ' / Music / Next Track (Restart) (Auto)');
@@ -1012,6 +1031,8 @@ const effects = (dispatch) => ({
     if (playingTrackIndex !== index && disableRepeatOnceOnTrackChange) {
       dispatch.playerModel.playerRepeatOff();
     }
+    // show desktop notification
+    dispatch.playerModel.playerShowNotification({ track: newTrack });
     // re-arm the engine window for the track after this one
     dispatch.playerModel.playerSyncGaplessQueue();
   },
@@ -1046,6 +1067,57 @@ const effects = (dispatch) => ({
       });
     }
     analyticsEvent(toUpperFirst(currentService) + ' / Music / Gapless ' + (gaplessPlayback ? 'On' : 'Off'));
+  },
+
+  //
+  // TRACK NOTIFICATIONS
+  //
+
+  playerShowNotification(payload, rootState) {
+    // Show a desktop notification when a new track starts. Only fires when
+    // the track ID actually changed and the setting is enabled. Cooldown
+    // guards against restarts and queue syncs.
+    const optionShowTrackNotification = rootState.sessionModel.optionShowTrackNotification;
+    if (!optionShowTrackNotification) return;
+
+    const { track } = payload;
+    if (!track) return;
+
+    // Deduplicate: skip if same track or within cooldown window
+    const now = Date.now();
+    const trackId = String(track.trackId ?? track.id);
+    if (
+      trackId === rootState.playerModel._lastNotifiedTrackId &&
+      now - rootState.playerModel._lastNotificationTime < 3000
+    ) {
+      return;
+    }
+
+    rootState.playerModel._lastNotifiedTrackId = trackId;
+    rootState.playerModel._lastNotificationTime = now;
+
+    // Check if the Notifications API is available
+    if (!('Notification' in window)) return;
+
+    // Request permission if needed (won't block — browser may have already granted)
+    if (Notification.permission === 'default') {
+      Notification.requestPermission();
+    }
+
+    if (Notification.permission !== 'granted') return;
+
+    const title = track.title || 'Unknown Track';
+    const body = track.artist || '';
+    const icon = track.thumbMd || null;
+
+    const notification = new Notification(title, {
+      body: body || undefined,
+      icon: icon || undefined,
+      tag: 'chromatix-track-notification',
+    });
+
+    // Auto-close after 5 seconds
+    setTimeout(() => notification.close(), 5000);
   },
 
   //

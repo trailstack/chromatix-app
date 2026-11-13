@@ -74,6 +74,14 @@ vi.mock('js/components', () => ({
   PlaybackErrorMessage: vi.fn(() => 'error message'),
 }));
 
+// Mock the Web Notifications API. Uses a plain function with a closure
+// array so we never rely on vi.fn() lifecycle — beforeEach/afterEach
+// interleaving and vi.clearAllMocks() calls make vi.fn() unreliable here.
+const _notificationCalls: Array<[string, NotificationOptions]> = [];
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+let MockNotificationClass: any;
+let savedNotification: unknown;
+
 // Keep the real utils (getTrackKeys, requiresTranscoding, sortList, etc.) but
 // stub the analytics call so tests can assert the tracked event names.
 vi.mock('js/utils', async (importOriginal) => {
@@ -100,14 +108,56 @@ const seedSession = (overrides: Record<string, unknown> = {}) => {
 };
 
 beforeEach(() => {
-  vi.clearAllMocks();
-  vi.mocked(playerX.loadTrack).mockReturnValue(true);
-  vi.mocked(playerX.getCurrentProgress).mockReturnValue(0);
+  _notificationCalls.length = 0;
+
+  MockNotificationClass = function (title: string, options?: NotificationOptions) {
+    _notificationCalls.push([title, options ?? {}]);
+  } as unknown as typeof Notification;
+  Object.defineProperty(MockNotificationClass.prototype, 'close', {
+    value: vi.fn(),
+    writable: true,
+    configurable: true,
+  });
+  let _perm: NotificationPermission = 'granted';
+  Object.defineProperty(MockNotificationClass, 'permission', {
+    get: () => _perm,
+    set: (val: NotificationPermission) => {
+      _perm = val;
+    },
+    configurable: true,
+  });
+  savedNotification = (globalThis as any).Notification;
+  Object.defineProperty(globalThis, 'Notification', {
+    value: MockNotificationClass,
+    writable: true,
+    configurable: true,
+  });
+  // Also set on window in case the code checks window.Notification
+  (window as any).Notification = MockNotificationClass;
+
+  (globalThis as any).Notification.permission = 'granted';
+
+  vi.mocked(playerX.loadTrack).mockClear().mockReturnValue(true);
+  vi.mocked(playerX.getCurrentProgress).mockClear().mockReturnValue(0);
+  vi.mocked(analyticsEvent).mockClear();
   // A real Rematch store with the real models, so effects dispatch into real
   // reducers and cross-model state transitions can be asserted.
   store = init({ models: { appModel, playerModel, sessionModel } });
   store.dispatch.appModel.setAppState({ currentService: 'plex' });
+  // Reset dedup state — previous tests may have set _lastNotifiedTrackId
+  // which would block notifications in subsequent tests.
+  const playerState = store.getState().playerModel;
+  playerState._lastNotifiedTrackId = null;
+  playerState._lastNotificationTime = 0;
   seedSession();
+});
+
+afterAll(() => {
+  Object.defineProperty(globalThis, 'Notification', {
+    value: savedNotification,
+    writable: true,
+    configurable: true,
+  });
 });
 
 // ======================================================================
@@ -775,6 +825,246 @@ describe('Testing "playerModel" store effects', () => {
       expect(state.volumeMuted).toBe(true);
       expect(playerX.setVolume).toHaveBeenCalledWith(0);
       expect(analyticsEvent).toHaveBeenCalledWith('Plex / Music / Mute On');
+    });
+  });
+
+  //
+  // TRACK NOTIFICATIONS
+  //
+
+  describe('playerShowNotification', () => {
+    test('Fires a notification when the setting is enabled and the track changes', () => {
+      seedSession({
+        optionShowTrackNotification: true,
+        playingTrackIndex: 0,
+        playingTrackList: TRACKS,
+        playingTrackKeys: [0, 1],
+      });
+
+      store.dispatch.playerModel.playerShowNotification({ track: TRACKS[1] });
+
+      expect(_notificationCalls).toHaveLength(1);
+      expect(_notificationCalls[0]).toEqual([
+        'Track Two',
+        { body: 'Artist One', icon: undefined, tag: 'chromatix-track-notification' },
+      ]);
+    });
+
+    test('Does not fire when the setting is disabled', () => {
+      seedSession({
+        optionShowTrackNotification: false,
+      });
+
+      store.dispatch.playerModel.playerShowNotification({ track: TRACKS[0] });
+
+      expect(_notificationCalls).toHaveLength(0);
+    });
+
+    test('Does not fire when no track is provided', () => {
+      seedSession({ optionShowTrackNotification: true });
+
+      store.dispatch.playerModel.playerShowNotification({});
+
+      expect(_notificationCalls).toHaveLength(0);
+    });
+
+    test('Does not fire for the same track within the cooldown window', () => {
+      seedSession({ optionShowTrackNotification: true });
+
+      store.dispatch.playerModel.playerShowNotification({ track: TRACKS[0] });
+      store.dispatch.playerModel.playerShowNotification({ track: TRACKS[0] });
+
+      expect(_notificationCalls).toHaveLength(1);
+    });
+
+    test('Fires for the same track after the cooldown expires', () => {
+      seedSession({ optionShowTrackNotification: true });
+
+      vi.useFakeTimers();
+      store.dispatch.playerModel.playerShowNotification({ track: TRACKS[0] });
+      vi.advanceTimersByTime(3001);
+      store.dispatch.playerModel.playerShowNotification({ track: TRACKS[0] });
+      vi.useRealTimers();
+
+      expect(_notificationCalls).toHaveLength(2);
+    });
+
+    test('Uses trackId for deduplication', () => {
+      seedSession({ optionShowTrackNotification: true });
+
+      store.dispatch.playerModel.playerShowNotification({ track: { id: 'x', trackId: '123', title: 'T1' } });
+      store.dispatch.playerModel.playerShowNotification({ track: { id: 'y', trackId: '123', title: 'T2' } });
+
+      expect(_notificationCalls).toHaveLength(1);
+    });
+
+    test('Does not fire when Notification permission is denied', () => {
+      seedSession({ optionShowTrackNotification: true });
+      (globalThis as any).Notification.permission = 'denied';
+
+      store.dispatch.playerModel.playerShowNotification({ track: TRACKS[0] });
+
+      expect(_notificationCalls).toHaveLength(0);
+    });
+
+    test('Does not fire when the Notification API is unavailable', () => {
+      seedSession({ optionShowTrackNotification: true });
+      const saved = (globalThis as any).Notification;
+      const savedWindow = (window as any).Notification;
+      delete (globalThis as any).Notification;
+      delete (window as any).Notification;
+
+      store.dispatch.playerModel.playerShowNotification({ track: TRACKS[0] });
+
+      expect(_notificationCalls).toHaveLength(0);
+      (globalThis as any).Notification = saved;
+      (window as any).Notification = savedWindow;
+    });
+
+    test('Includes album artwork as the notification icon', () => {
+      seedSession({ optionShowTrackNotification: true });
+
+      const trackWithArt = { ...TRACKS[0], thumbMd: 'https://server.local/thumb.jpg' };
+      store.dispatch.playerModel.playerShowNotification({ track: trackWithArt });
+
+      expect(_notificationCalls).toHaveLength(1);
+      expect(_notificationCalls[0]).toEqual([
+        'Track One',
+        { body: 'Artist One', icon: 'https://server.local/thumb.jpg', tag: 'chromatix-track-notification' },
+      ]);
+    });
+
+    test('Uses track.id when trackId is missing', () => {
+      seedSession({ optionShowTrackNotification: true });
+
+      store.dispatch.playerModel.playerShowNotification({ track: { id: 'track-a', title: 'T1' } });
+      store.dispatch.playerModel.playerShowNotification({ track: { id: 'track-a', title: 'T2' } });
+
+      expect(_notificationCalls).toHaveLength(1);
+    });
+
+    test('Defaults title to "Unknown Track" when title is missing', () => {
+      seedSession({ optionShowTrackNotification: true });
+
+      store.dispatch.playerModel.playerShowNotification({ track: { trackId: 'x' } });
+
+      expect(_notificationCalls[0]).toEqual([
+        'Unknown Track',
+        { body: undefined, icon: undefined, tag: 'chromatix-track-notification' },
+      ]);
+    });
+  });
+
+  describe('playerLoadTrackList notification', () => {
+    test('Fires a notification when a new track list is loaded', () => {
+      seedSession();
+
+      store.dispatch.playerModel.playerLoadTrackList({
+        playingVariant: 'tracks',
+        playingTrackIndex: 0,
+        playingTrackKeys: [0],
+        playingTrackList: [TRACKS[0]],
+        playingTrackCount: 1,
+        playingTrackProgress: 0,
+      });
+
+      expect(_notificationCalls).toHaveLength(1);
+    });
+
+    test('Does not fire a second notification when playerLoadIndex is also called', () => {
+      seedSession({
+        optionShowTrackNotification: true,
+        playingVariant: 'tracks',
+        playingTrackIndex: 0,
+        playingTrackKeys: [0],
+        playingTrackList: [TRACKS[0]],
+        playingTrackCount: 1,
+      });
+
+      // playerLoadTrackList fires first
+      store.dispatch.playerModel.playerLoadTrackList({
+        playingVariant: 'tracks',
+        playingTrackIndex: 0,
+        playingTrackKeys: [0],
+        playingTrackList: [TRACKS[0]],
+        playingTrackCount: 1,
+        playingTrackProgress: 0,
+      });
+
+      // playerLoadIndex would normally fire again for the same track,
+      // but the dedup cooldown prevents it
+      store.dispatch.playerModel.playerLoadIndex({ index: 0, play: true });
+
+      expect(_notificationCalls).toHaveLength(1);
+    });
+  });
+
+  describe('playerPrev notification', () => {
+    test('Fires a notification when going to the previous track', () => {
+      seedSession({ playingTrackIndex: 2 });
+      vi.mocked(playerX.getCurrentProgress).mockReturnValue(0);
+
+      store.dispatch.playerModel.playerPrev();
+
+      expect(_notificationCalls).toHaveLength(1);
+    });
+
+    test('Fires a notification when wrapping to the last track with repeat all', () => {
+      seedSession({ playingTrackIndex: 0, playingRepeatAll: true });
+      vi.mocked(playerX.getCurrentProgress).mockReturnValue(0);
+
+      store.dispatch.playerModel.playerPrev();
+
+      expect(_notificationCalls).toHaveLength(1);
+    });
+  });
+
+  describe('playerNext notification', () => {
+    test('Fires a notification when advancing to the next track', () => {
+      seedSession({ playingTrackIndex: 1 });
+
+      store.dispatch.playerModel.playerNext();
+
+      expect(_notificationCalls).toHaveLength(1);
+    });
+
+    test('Fires a notification when wrapping to the first track with repeat all', () => {
+      seedSession({ playingTrackIndex: 4, playingRepeatAll: true });
+
+      store.dispatch.playerModel.playerNext();
+
+      expect(_notificationCalls).toHaveLength(1);
+    });
+
+    test('Does not fire a notification for repeat-once (same track)', () => {
+      seedSession({ playingTrackIndex: 2, playingRepeatOnce: true });
+
+      store.dispatch.playerModel.playerNext(true);
+
+      expect(_notificationCalls).toHaveLength(0);
+    });
+
+    test('Does not fire a notification when loading without playing', () => {
+      seedSession({ playingTrackIndex: 4 });
+
+      store.dispatch.playerModel.playerNext();
+
+      // The "no playing" branch doesn't call playerShowNotification
+      expect(_notificationCalls).toHaveLength(0);
+    });
+  });
+
+  describe('playerSeamAdvance notification', () => {
+    test('Fires a notification when the gapless engine advances', () => {
+      seedSession({
+        playingTrackIndex: 0,
+        playingTrackList: TRACKS,
+        playingTrackKeys: [0, 1, 2],
+      });
+
+      store.dispatch.playerModel.playerSeamAdvance({ index: 1 });
+
+      expect(_notificationCalls).toHaveLength(1);
     });
   });
 });

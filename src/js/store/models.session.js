@@ -64,6 +64,7 @@ const sessionState = {
   gaplessPlayback: false,
 
   optionLogPlaybackToServer: true,
+  optionShowTrackNotification: true,
 
   optionShowFullTitles_Deprecated: false,
 
