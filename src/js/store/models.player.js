@@ -648,6 +648,7 @@ const effects = (dispatch) => ({
     const userToken = rootState.appModel.userToken;
     const sessionId = rootState.sessionModel.sessionId;
     const currentTrack = payload.playingTrackList[payload.playingTrackKeys[payload.playingTrackIndex]];
+    setDocumentTitle(currentTrack);
     playerX.loadTrack(
       withPlaybackSrc(currentTrack, currentService, serverBaseUrl, userToken, sessionId),
       0,
@@ -718,6 +719,7 @@ const effects = (dispatch) => ({
         if (play) {
           bridge.logPlaybackPlay(currentTrack, progress);
           analyticsEvent(toUpperFirst(currentService) + ' / Music / Play (Track)');
+          setDocumentTitle(currentTrack);
         }
         // disable repeat once
         if (playingTrackIndex !== index && disableRepeatOnceOnTrackChange) {
@@ -1024,6 +1026,7 @@ const effects = (dispatch) => ({
     });
     // log playback state to server
     const newTrack = playingTrackList[playingTrackKeys[index]];
+    setDocumentTitle(newTrack);
     bridge.logPlaybackPlay(newTrack);
     analyticsEvent(toUpperFirst(currentService) + ' / Music / Next Track (Gapless)');
     // disable repeat once, mirroring the playerLoadIndex behaviour
@@ -1199,6 +1202,15 @@ export const playerModel = {
 
 const toUpperFirst = (string) => {
   return string?.charAt(0).toUpperCase() + string?.slice(1);
+};
+
+// Sets the document title to the currently playing track.
+const setDocumentTitle = (track) => {
+  if (!track) return;
+  const title = [track?.title, track?.artist].filter(Boolean).join(' • ');
+  if (title) {
+    document.title = title;
+  }
 };
 
 // Prepares a track for playback using the current connection details, since a restored queue may
