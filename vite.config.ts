@@ -20,57 +20,60 @@ const fullReloadOnHooksChange = {
   },
 };
 
-export default defineConfig({
-  appType: 'spa',
-  plugins: [
-    react(),
-    svgr(),
-    fullReloadOnHooksChange,
-    !!process.env.ANALYZE && visualizer({ open: true, filename: 'build/stats.html', gzipSize: true, brotliSize: true }),
-  ],
-  resolve: {
-    tsconfigPaths: true,
-  },
-  server: {
-    host: true,
-    port: 4000,
-    open: true,
-  },
-  build: {
-    outDir: 'build',
-    sourcemap: false,
-    target: 'es2020',
-    rolldownOptions: {
-      output: {
-        // Code splitting
-        manualChunks: (id) => {
-          // if (
-          //   id.includes('node_modules/react/') ||
-          //   id.includes('node_modules/react-dom/') ||
-          //   id.includes('node_modules/react-redux/') ||
-          //   id.includes('node_modules/react-router-dom/') ||
-          //   id.includes('node_modules/scheduler/')
-          // ) {
-          //   return 'vendor';
-          // }
-          if (id.includes('node_modules/@radix-ui/')) {
-            return 'radix';
-          }
-          if (id.includes('node_modules/dashjs/')) {
-            return 'dashjs';
-          }
+export default defineConfig(() => {
+  return {
+    appType: 'spa',
+    plugins: [
+      react(),
+      svgr(),
+      fullReloadOnHooksChange,
+      !!process.env.ANALYZE &&
+        visualizer({ open: true, filename: 'build/stats.html', gzipSize: true, brotliSize: true }),
+    ],
+    resolve: {
+      tsconfigPaths: true,
+    },
+    server: {
+      host: true,
+      port: 4000,
+      open: true,
+    },
+    build: {
+      outDir: 'build',
+      sourcemap: false,
+      target: 'es2020',
+      rolldownOptions: {
+        output: {
+          // Code splitting
+          manualChunks: (id) => {
+            // if (
+            //   id.includes('node_modules/react/') ||
+            //   id.includes('node_modules/react-dom/') ||
+            //   id.includes('node_modules/react-redux/') ||
+            //   id.includes('node_modules/react-router-dom/') ||
+            //   id.includes('node_modules/scheduler/')
+            // ) {
+            //   return 'vendor';
+            // }
+            if (id.includes('node_modules/@radix-ui/')) {
+              return 'radix';
+            }
+            if (id.includes('node_modules/dashjs/')) {
+              return 'dashjs';
+            }
+          },
         },
       },
     },
-  },
-  test: {
-    environment: 'jsdom',
-    globals: true,
-    setupFiles: ['./vitest.setup.ts'],
-    include: ['src/**/*.test.ts'],
-    exclude: ['**/node_modules/**', '**/_archived/**'],
-    env: {
-      VITE_ENV: 'local',
+    test: {
+      environment: 'jsdom',
+      globals: true,
+      setupFiles: ['./vitest.setup.ts'],
+      include: ['src/**/*.test.ts'],
+      exclude: ['**/node_modules/**', '**/_archived/**'],
+      env: {
+        VITE_ENV: 'local',
+      },
     },
-  },
+  };
 });

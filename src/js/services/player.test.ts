@@ -24,7 +24,7 @@
 // Created via vi.hoisted so the vi.mock factories (which are hoisted above
 // imports) can reference them, and so the same mock instances survive the
 // vi.resetModules() call in beforeEach.
-const { nativeMock, dashMock } = vi.hoisted(() => {
+const { nativeMock, dashMock, gaplessMock } = vi.hoisted(() => {
   const createSubPlayerMock = () => ({
     init: vi.fn(),
     unload: vi.fn(),
@@ -39,11 +39,20 @@ const { nativeMock, dashMock } = vi.hoisted(() => {
   return {
     nativeMock: createSubPlayerMock(),
     dashMock: { ...createSubPlayerMock(), isSupported: vi.fn() },
+    gaplessMock: {
+      ...createSubPlayerMock(),
+      isSupported: vi.fn(() => true),
+      setEnabled: vi.fn(),
+      canPlay: vi.fn(() => false),
+      syncQueue: vi.fn(),
+      getDebugState: vi.fn(() => ({})),
+    },
   };
 });
 
 vi.mock('./player.native', () => nativeMock);
 vi.mock('./player.dash', () => dashMock);
+vi.mock('./player.gapless', () => gaplessMock);
 
 // ======================================================================
 // HELPERS
@@ -89,6 +98,9 @@ describe('Testing "player" router service', () => {
     onCanPlay: vi.fn(),
     onEnded: vi.fn(),
     onError: vi.fn(),
+    onGaplessSeamAdvance: vi.fn(),
+    onGaplessError: vi.fn(),
+    onGaplessPlayBlocked: vi.fn(),
   });
 
   const loadNativeTrack = () => {
@@ -203,6 +215,8 @@ describe('Testing "player" router service', () => {
       expect(nativeMock.resume).toHaveBeenCalledTimes(1);
       expect(dashMock.pause).not.toHaveBeenCalled();
       expect(dashMock.resume).not.toHaveBeenCalled();
+      expect(gaplessMock.pause).not.toHaveBeenCalled();
+      expect(gaplessMock.resume).not.toHaveBeenCalled();
     });
 
     test('Routes all controls to the native player after a native load', () => {
@@ -265,18 +279,20 @@ describe('Testing "player" router service', () => {
   // ======================================================================
 
   describe('Volume', () => {
-    test('Fans setVolume out to both players when native is active', () => {
+    test('Fans setVolume out to all three players when native is active', () => {
       loadNativeTrack();
       player.setVolume(65);
       expect(nativeMock.setVolume).toHaveBeenCalledWith(65);
       expect(dashMock.setVolume).toHaveBeenCalledWith(65);
+      expect(gaplessMock.setVolume).toHaveBeenCalledWith(65);
     });
 
-    test('Fans setVolume out to both players when DASH is active', () => {
+    test('Fans setVolume out to all three players when DASH is active', () => {
       loadDashTrack();
       player.setVolume(30);
       expect(nativeMock.setVolume).toHaveBeenCalledWith(30);
       expect(dashMock.setVolume).toHaveBeenCalledWith(30);
+      expect(gaplessMock.setVolume).toHaveBeenCalledWith(30);
     });
   });
 
@@ -285,11 +301,12 @@ describe('Testing "player" router service', () => {
   // ======================================================================
 
   describe('Unload', () => {
-    test('Unloads both players', () => {
+    test('Unloads all three players', () => {
       loadDashTrack();
       player.unload();
       expect(nativeMock.unload).toHaveBeenCalled();
       expect(dashMock.unload).toHaveBeenCalled();
+      expect(gaplessMock.unload).toHaveBeenCalled();
     });
 
     test('Resets routing to the native player', () => {
@@ -306,14 +323,16 @@ describe('Testing "player" router service', () => {
   // ======================================================================
 
   describe('Init Callback Gating', () => {
-    test('Initialises both sub-players with the volume settings and wrapped callbacks', () => {
+    test('Initialises all three sub-players with the volume settings and wrapped callbacks', () => {
       const params = createInitParams();
       player.init(params);
 
       expect(nativeMock.init).toHaveBeenCalledTimes(1);
       expect(dashMock.init).toHaveBeenCalledTimes(1);
+      expect(gaplessMock.init).toHaveBeenCalledTimes(1);
       expect(nativeMock.init).toHaveBeenCalledWith(expect.objectContaining({ volumeLevel: 75, volumeMuted: false }));
       expect(dashMock.init).toHaveBeenCalledWith(expect.objectContaining({ volumeLevel: 75, volumeMuted: false }));
+      expect(gaplessMock.init).toHaveBeenCalledWith(expect.objectContaining({ volumeLevel: 75, volumeMuted: false }));
 
       // Callbacks are wrapped (gated on activePlayer), not passed through as-is.
       const nativeWrapped = nativeMock.init.mock.calls[0][0];
@@ -324,11 +343,12 @@ describe('Testing "player" router service', () => {
       expect(dashWrapped.onEnded).not.toBe(params.onEnded);
     });
 
-    test('Forwards native events and suppresses DASH events before any load (native is default)', () => {
+    test('Forwards native events and suppresses DASH and gapless events before any load (native is default)', () => {
       const params = createInitParams();
       player.init(params);
       const nativeWrapped = nativeMock.init.mock.calls[0][0];
       const dashWrapped = dashMock.init.mock.calls[0][0];
+      const gaplessWrapped = gaplessMock.init.mock.calls[0][0];
 
       nativeWrapped.onLoadStart();
       nativeWrapped.onCanPlay();
@@ -337,25 +357,41 @@ describe('Testing "player" router service', () => {
       expect(params.onCanPlay).toHaveBeenCalledTimes(1);
       expect(params.onEnded).toHaveBeenCalledTimes(1);
 
-      // Stale events from the inactive DASH player must not leak through.
+      // Stale events from the inactive DASH and gapless players must not leak through.
       dashWrapped.onLoadStart();
       dashWrapped.onCanPlay();
       dashWrapped.onEnded();
       expect(params.onLoadStart).toHaveBeenCalledTimes(1);
       expect(params.onCanPlay).toHaveBeenCalledTimes(1);
       expect(params.onEnded).toHaveBeenCalledTimes(1);
+
+      gaplessWrapped.onLoadStart();
+      gaplessWrapped.onCanPlay();
+      gaplessWrapped.onEnded();
+      expect(params.onLoadStart).toHaveBeenCalledTimes(1);
+      expect(params.onCanPlay).toHaveBeenCalledTimes(1);
+      expect(params.onEnded).toHaveBeenCalledTimes(1);
     });
 
-    test('Forwards DASH events and suppresses native events after a DASH load', () => {
+    test('Forwards DASH events and suppresses native and gapless events after a DASH load', () => {
       const params = createInitParams();
       player.init(params);
       loadDashTrack();
       const nativeWrapped = nativeMock.init.mock.calls[0][0];
       const dashWrapped = dashMock.init.mock.calls[0][0];
+      const gaplessWrapped = gaplessMock.init.mock.calls[0][0];
 
       nativeWrapped.onLoadStart();
       nativeWrapped.onCanPlay();
       nativeWrapped.onEnded();
+      expect(params.onLoadStart).not.toHaveBeenCalled();
+      expect(params.onCanPlay).not.toHaveBeenCalled();
+      expect(params.onEnded).not.toHaveBeenCalled();
+
+      // Gapless events are also suppressed when DASH is active.
+      gaplessWrapped.onLoadStart();
+      gaplessWrapped.onCanPlay();
+      gaplessWrapped.onEnded();
       expect(params.onLoadStart).not.toHaveBeenCalled();
       expect(params.onCanPlay).not.toHaveBeenCalled();
       expect(params.onEnded).not.toHaveBeenCalled();
@@ -374,10 +410,12 @@ describe('Testing "player" router service', () => {
       loadDashTrack();
       const nativeWrapped = nativeMock.init.mock.calls[0][0];
       const dashWrapped = dashMock.init.mock.calls[0][0];
+      const gaplessWrapped = gaplessMock.init.mock.calls[0][0];
       const errorPayload = { event: new Event('error'), playerElement: document.createElement('audio') };
 
-      // A stale error from the inactive native player is suppressed.
+      // Stale errors from the inactive native and gapless players are suppressed.
       nativeWrapped.onError(errorPayload);
+      gaplessWrapped.onError(errorPayload);
       expect(params.onError).not.toHaveBeenCalled();
 
       // An error from the active DASH player is forwarded with its payload intact.
@@ -393,10 +431,13 @@ describe('Testing "player" router service', () => {
       player.unload();
       const nativeWrapped = nativeMock.init.mock.calls[0][0];
       const dashWrapped = dashMock.init.mock.calls[0][0];
+      const gaplessWrapped = gaplessMock.init.mock.calls[0][0];
 
       nativeWrapped.onEnded();
       expect(params.onEnded).toHaveBeenCalledTimes(1);
       dashWrapped.onEnded();
+      expect(params.onEnded).toHaveBeenCalledTimes(1);
+      gaplessWrapped.onEnded();
       expect(params.onEnded).toHaveBeenCalledTimes(1);
     });
   });

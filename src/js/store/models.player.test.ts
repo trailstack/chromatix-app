@@ -35,6 +35,9 @@ vi.mock('js/services/player', () => ({
   setProgress: vi.fn(),
   getCurrentProgress: vi.fn(() => 0),
   setVolume: vi.fn(),
+  setGaplessEnabled: vi.fn(),
+  isGaplessSupported: vi.fn(() => true),
+  syncGaplessQueue: vi.fn(),
 }));
 
 // Every bridge function referenced by the three models under test, so no
@@ -153,7 +156,7 @@ describe('Testing "playerModel" store effects', () => {
       onEnded();
 
       // ended -> playerNext(true) -> load the next track and play it
-      expect(playerX.loadTrack).toHaveBeenCalledWith(TRACKS[2], undefined, true);
+      expect(playerX.loadTrack).toHaveBeenCalledWith(TRACKS[2], undefined, true, 2);
       expect(store.getState().sessionModel.playingTrackIndex).toBe(2);
       expect(analyticsEvent).toHaveBeenCalledWith('Plex / Music / Next Track (Auto)');
     });
@@ -179,7 +182,7 @@ describe('Testing "playerModel" store effects', () => {
     test('Loads the track at the given index and starts playback', () => {
       store.dispatch.playerModel.playerLoadIndex({ index: 1, play: true, progress: 30 });
 
-      expect(playerX.loadTrack).toHaveBeenCalledWith(TRACKS[1], 30, true);
+      expect(playerX.loadTrack).toHaveBeenCalledWith(TRACKS[1], 30, true, 1);
       const state = store.getState();
       expect(state.playerModel.playerPlaying).toBe(true);
       expect(state.playerModel.playerTrackLoaded).toBe(true);
@@ -192,7 +195,7 @@ describe('Testing "playerModel" store effects', () => {
     test('Loads without playing when play is false', () => {
       store.dispatch.playerModel.playerLoadIndex({ index: 1, play: false });
 
-      expect(playerX.loadTrack).toHaveBeenCalledWith(TRACKS[1], undefined, false);
+      expect(playerX.loadTrack).toHaveBeenCalledWith(TRACKS[1], undefined, false, 1);
       const state = store.getState();
       expect(state.playerModel.playerPlaying).toBe(false);
       expect(state.playerModel.playerTrackLoaded).toBe(true);
@@ -245,7 +248,7 @@ describe('Testing "playerModel" store effects', () => {
       store.dispatch.playerModel.playerResume();
 
       expect(playerX.resume).not.toHaveBeenCalled();
-      expect(playerX.loadTrack).toHaveBeenCalledWith(TRACKS[1], undefined, true);
+      expect(playerX.loadTrack).toHaveBeenCalledWith(TRACKS[1], undefined, true, 1);
       const state = store.getState().playerModel;
       expect(state.playerPlaying).toBe(true);
       expect(state.playerTrackError).toBe(false);
@@ -312,7 +315,7 @@ describe('Testing "playerModel" store effects', () => {
       store.dispatch.playerModel.playerPrev();
 
       expect(playerX.restart).not.toHaveBeenCalled();
-      expect(playerX.loadTrack).toHaveBeenCalledWith(TRACKS[1], undefined, true);
+      expect(playerX.loadTrack).toHaveBeenCalledWith(TRACKS[1], undefined, true, 1);
       expect(store.getState().sessionModel.playingTrackIndex).toBe(1);
       expect(analyticsEvent).toHaveBeenCalledWith('Plex / Music / Previous Track');
     });
@@ -321,7 +324,7 @@ describe('Testing "playerModel" store effects', () => {
       seedSession({ playingTrackIndex: 0, playingRepeatAll: true });
       store.dispatch.playerModel.playerPrev();
 
-      expect(playerX.loadTrack).toHaveBeenCalledWith(TRACKS[4], undefined, true);
+      expect(playerX.loadTrack).toHaveBeenCalledWith(TRACKS[4], undefined, true, 4);
       expect(store.getState().sessionModel.playingTrackIndex).toBe(4);
       expect(store.getState().playerModel.playerPlaying).toBe(true);
     });
@@ -342,7 +345,7 @@ describe('Testing "playerModel" store effects', () => {
       store.dispatch.playerModel.playerNext();
 
       expect(playerX.loadTrack).toHaveBeenCalledTimes(1);
-      expect(playerX.loadTrack).toHaveBeenCalledWith(TRACKS[2], undefined, true);
+      expect(playerX.loadTrack).toHaveBeenCalledWith(TRACKS[2], undefined, true, 2);
       const state = store.getState();
       expect(state.sessionModel.playingTrackIndex).toBe(2);
       expect(state.playerModel.playerPlaying).toBe(true);
@@ -356,7 +359,7 @@ describe('Testing "playerModel" store effects', () => {
       seedSession({ playingTrackIndex: 4 });
       store.dispatch.playerModel.playerNext();
 
-      expect(playerX.loadTrack).toHaveBeenCalledWith(TRACKS[0], undefined, false);
+      expect(playerX.loadTrack).toHaveBeenCalledWith(TRACKS[0], undefined, false, 0);
       const state = store.getState();
       expect(state.sessionModel.playingTrackIndex).toBe(0);
       expect(state.playerModel.playerPlaying).toBe(false);
@@ -368,7 +371,7 @@ describe('Testing "playerModel" store effects', () => {
       seedSession({ playingTrackIndex: 4, playingRepeatAll: true });
       store.dispatch.playerModel.playerNext();
 
-      expect(playerX.loadTrack).toHaveBeenCalledWith(TRACKS[0], undefined, true);
+      expect(playerX.loadTrack).toHaveBeenCalledWith(TRACKS[0], undefined, true, 0);
       const state = store.getState();
       expect(state.sessionModel.playingTrackIndex).toBe(0);
       expect(state.playerModel.playerPlaying).toBe(true);
@@ -380,7 +383,7 @@ describe('Testing "playerModel" store effects', () => {
       seedSession({ playingTrackIndex: 2, playingRepeatOnce: true });
       store.dispatch.playerModel.playerNext(true);
 
-      expect(playerX.loadTrack).toHaveBeenCalledWith(TRACKS[2], undefined, true);
+      expect(playerX.loadTrack).toHaveBeenCalledWith(TRACKS[2], undefined, true, 2);
       const state = store.getState().sessionModel;
       expect(state.playingTrackIndex).toBe(2);
       // repeat once is only cleared when the track index actually changes
@@ -392,7 +395,7 @@ describe('Testing "playerModel" store effects', () => {
       seedSession({ playingTrackIndex: 1, playingRepeatOnce: true });
       store.dispatch.playerModel.playerNext();
 
-      expect(playerX.loadTrack).toHaveBeenCalledWith(TRACKS[2], undefined, true);
+      expect(playerX.loadTrack).toHaveBeenCalledWith(TRACKS[2], undefined, true, 2);
       const state = store.getState().sessionModel;
       expect(state.playingTrackIndex).toBe(2);
       // disableRepeatOnceOnTrackChange (default on) clears repeat once, and

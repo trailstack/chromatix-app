@@ -27,3 +27,4 @@ public/tags/
 
 # Local-only docs
 docs/
+!docs/GAPLESS.md
