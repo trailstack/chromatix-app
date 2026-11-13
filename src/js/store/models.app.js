@@ -96,6 +96,9 @@ const libraryState = {
   allAlbums: null,
   allAlbumTracks: {},
   haveGotAllAlbums: false,
+  // tracks
+  allTracks: null,
+  haveGotAllTracks: false,
   // folders
   allFolderItems: {},
   // playlists
@@ -797,6 +800,21 @@ const effects = (dispatch) => {
       });
     },
 
+    storeAllTracks(payload, rootState) {
+      console.log('%c--- storeAllTracks ---', 'color:#07a098');
+      const { allTracks } = payload;
+      dispatch.appModel.setAppState({
+        allTracks,
+      });
+    },
+
+    appendAllTracks(payload, rootState) {
+      const prevAllTracks = rootState.appModel.allTracks || [];
+      dispatch.appModel.setAppState({
+        allTracks: [...prevAllTracks, ...payload.tracks],
+      });
+    },
+
     setAlbumRating(payload, rootState) {
       console.log('%c--- setAlbumRating ---', 'color:#07a098');
       const { isFavourite, ratingKey, rating } = payload;
@@ -1094,10 +1112,21 @@ const effects = (dispatch) => {
           allPlaylistTracks[key] = playlistTracks;
         }
       });
+
+      // update all tracks
+      const prevAllTracks = rootState.appModel.allTracks;
+      const allTracks = prevAllTracks ? [...prevAllTracks] : [];
+      const trackIndex = allTracks.findIndex((track) => track.trackId === ratingKey);
+      if (trackIndex !== -1) {
+        allTracks[trackIndex].isFavourite = isFavourite;
+        allTracks[trackIndex].userRating = rating;
+      }
+
       dispatch.appModel.setAppState({
         allArtistTracks,
         allAlbumTracks,
         allPlaylistTracks,
+        allTracks,
       });
 
       // update queue tracks

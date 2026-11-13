@@ -289,6 +289,7 @@ const effects = (dispatch) => ({
       playingFolderId,
       playingOrder,
       playingTrackIndex,
+      playingTracks,
     } = payload;
     const isShuffle = rootState.sessionModel.playingShuffle;
     if (playingVariant === 'artists') {
@@ -320,6 +321,14 @@ const effects = (dispatch) => ({
       dispatch.playerModel.playerLoadFolder({
         folderId: playingFolderId,
         playingOrder: playingOrder,
+        trackIndex: playingTrackIndex,
+        isShuffle: isShuffle,
+        isTrack: true, // this ensures that the trackIndex is used
+      });
+    } else if (playingVariant === 'tracks') {
+      dispatch.playerModel.playerLoadTracks({
+        playingOrder: playingOrder,
+        playingTracks: playingTracks,
         trackIndex: playingTrackIndex,
         isShuffle: isShuffle,
         isTrack: true, // this ensures that the trackIndex is used
@@ -504,6 +513,118 @@ const effects = (dispatch) => ({
     });
 
     analyticsEvent(toUpperFirst(currentService) + ' / Music / Play (Folder)');
+  },
+
+  async playerLoadTracks(payload, rootState) {
+    console.log('%c--- playerLoadTracks ---', 'color:#16b15c');
+    const {
+      playingTracks = null,
+      trackIndex = 0,
+      isShuffle = rootState.sessionModel.playingShuffle,
+      isTrack = false,
+    } = payload;
+
+    const currentService = rootState.appModel.currentService;
+    const libraryId = rootState.sessionModel.currentLibrary?.libraryId;
+    const currentAllTracks = rootState.appModel.allTracks || [];
+
+    // The list view sorts tracks independently of the raw server order held in
+    // appModel.allTracks, so it passes its sorted entries as playingTracks.
+    // Using that list means trackIndex (the row clicked) maps to the track on
+    // screen; indexing the raw order instead would play the wrong track.
+    const currentTracks =
+      playingTracks && playingTracks.length
+        ? playingTracks
+        : currentAllTracks.filter((track) => track.libraryId === libraryId && !track.error404);
+
+    const trackKeys = getTrackKeys(currentTracks.length, null, isShuffle, isTrack ? trackIndex : null);
+    const realIndex = isTrack ? trackKeys.indexOf(trackIndex) : 0;
+
+    dispatch.playerModel.playerLoadTrackList({
+      playingVariant: 'tracks',
+      playingServerId: rootState.sessionModel.currentServer?.serverId,
+      playingLibraryId: rootState.sessionModel.currentLibrary?.libraryId,
+      playingArtistId: null,
+      playingAlbumId: null,
+      playingPlaylistId: null,
+      playingFolderId: null,
+      playingLink: `/libraries/${rootState.sessionModel.currentLibrary?.libraryId}/tracks`,
+      playingOrder: null,
+      playingTrackIndex: realIndex,
+      playingTrackKeys: trackKeys,
+      playingTrackList: currentTracks,
+      playingTrackCount: currentTracks.length,
+      playingTrackProgress: 0,
+      playingShuffle: isShuffle,
+    });
+
+    analyticsEvent(toUpperFirst(currentService) + ' / Music / Play (Tracks)');
+  },
+
+  playerSyncTrackList(payload, rootState) {
+    // The Tracks view loads its library a page at a time, so the queue it
+    // started with only holds the pages that had arrived then. Extend it as
+    // more tracks load, keeping the current track and queue position, so "next"
+    // and shuffle can reach the rest of the library.
+    const { playingTracks = null } = payload;
+    if (!playingTracks?.length) return;
+
+    const session = rootState.sessionModel;
+    const playingTrackList = session.playingTrackList || [];
+    const playingTrackKeys = session.playingTrackKeys || [];
+
+    // Only the Tracks view for the library (and server) currently playing.
+    if (session.playingVariant !== 'tracks') return;
+    if (session.playingLibraryId !== session.currentLibrary?.libraryId) return;
+    if (session.playingServerId !== session.currentServer?.serverId) return;
+
+    // Only react to the list growing; re-sorts of the same rows are ignored.
+    if (playingTracks.length <= playingTrackList.length) return;
+
+    const currentTrack = playingTrackList[playingTrackKeys[session.playingTrackIndex]];
+    if (!currentTrack) return;
+
+    // Sorting inserts new tracks between existing rows, so old indexes no longer
+    // point at the same tracks. Rebuild the queue by track identity instead.
+    const newIndexById = new Map();
+    playingTracks.forEach((track, index) => {
+      newIndexById.set(String(track.trackId), index);
+    });
+    const currentNewIndex = newIndexById.get(String(currentTrack.trackId));
+    if (currentNewIndex === undefined) return;
+
+    let newKeys;
+    let newCurrentIndex;
+
+    if (session.playingShuffle) {
+      // Keep the shuffled order already played, then append the new tracks in a
+      // shuffled order of their own.
+      newKeys = playingTrackKeys
+        .map((oldIndex) => newIndexById.get(String(playingTrackList[oldIndex]?.trackId)))
+        .filter((index) => index !== undefined);
+      const queued = new Set(newKeys);
+      const freshKeys = playingTracks.map((_track, index) => index).filter((index) => !queued.has(index));
+      for (let i = freshKeys.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [freshKeys[i], freshKeys[j]] = [freshKeys[j], freshKeys[i]];
+      }
+      newKeys = [...newKeys, ...freshKeys];
+      newCurrentIndex = newKeys.indexOf(currentNewIndex);
+    } else {
+      // The view is sorted by the same comparator as before, so the new rows
+      // simply slot into the existing order: sequential keys still hold.
+      newKeys = playingTracks.map((_track, index) => index);
+      newCurrentIndex = currentNewIndex;
+    }
+
+    dispatch.sessionModel.setSessionState({
+      playingTrackKeys: newKeys,
+      playingTrackList: playingTracks,
+      playingTrackIndex: newCurrentIndex,
+      playingTrackCount: playingTracks.length,
+    });
+    // keep the gapless engine's queue mirror aligned with the extended queue
+    dispatch.playerModel.playerSyncGaplessQueue();
   },
 
   playerLoadTrackList(payload, rootState) {

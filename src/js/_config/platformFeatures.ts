@@ -6,6 +6,7 @@ export const platformFeatures = {
     menuAlbums: true,
     menuFolders: false,
     menuPlaylists: true,
+    menuTracks: true,
 
     // menu - browse
     menuArtistCollections: false,
@@ -34,6 +35,7 @@ export const platformFeatures = {
     menuAlbums: true,
     menuFolders: true,
     menuPlaylists: true,
+    menuTracks: true,
 
     // menu - browse
     menuArtistCollections: true,

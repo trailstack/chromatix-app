@@ -431,6 +431,117 @@ const getTableOptions = (variant, artistId, albumId, playlistId, folderId, sortK
     ];
   }
 
+  // TRACKS (library-wide)
+  else if (variant === 'tracks') {
+    tableVariant = 'tracks';
+    tableOptions = [
+      {
+        colKey: 'sortOrder',
+        label: '#',
+        isDefault: true,
+        colWidth: '30px',
+        headerClassName: 'colCenter',
+        isAsc: sortKey === 'sortOrder' && orderKey === 'asc',
+        isDesc: sortKey === 'sortOrder' && orderKey === 'desc',
+        showArrows: false,
+        visible: true,
+      },
+      {
+        colKey: 'thumb',
+        label: '',
+        icon: 'FolderIcon',
+        colWidth: '41px',
+        visible: colOptions?.artwork !== false,
+        visibleInHeader: false,
+      },
+      {
+        colKey: 'title',
+        label: 'Title',
+        colWidth: '1.2fr',
+        headerStyle:
+          colOptions?.artwork !== false
+            ? {
+                gridColumn: '2 / span 2',
+              }
+            : {},
+        isAsc: sortKey === 'title' && orderKey === 'asc',
+        isDesc: sortKey === 'title' && orderKey === 'desc',
+        visible: true,
+      },
+      {
+        colKey: 'artist',
+        label: 'Artist',
+        colWidth: '1fr',
+        isAsc: sortKey === 'artist' && orderKey === 'asc',
+        isDesc: sortKey === 'artist' && orderKey === 'desc',
+        visible: colOptions?.artist !== false,
+      },
+      {
+        colKey: 'album',
+        label: 'Album',
+        colWidth: '1fr',
+        isAsc: sortKey === 'album' && orderKey === 'asc',
+        isDesc: sortKey === 'album' && orderKey === 'desc',
+        visible: colOptions?.album !== false,
+      },
+      {
+        colKey: 'releaseDate',
+        label: 'Released',
+        isDefault: true,
+        colWidth: '0.6fr',
+        isAsc: sortKey === 'releaseDate' && orderKey === 'asc',
+        isDesc: sortKey === 'releaseDate' && orderKey === 'desc',
+        visible: colOptions?.releaseDate !== false,
+      },
+      {
+        colKey: 'codec',
+        label: 'Audio Codec',
+        colWidth: '0.6fr',
+        isAsc: sortKey === 'codec' && orderKey === 'asc',
+        isDesc: sortKey === 'codec' && orderKey === 'desc',
+        visible: colOptions?.codec !== false,
+      },
+      {
+        colKey: 'bitrate',
+        label: 'Bitrate',
+        colWidth: '0.6fr',
+        isAsc: sortKey === 'bitrate' && orderKey === 'asc',
+        isDesc: sortKey === 'bitrate' && orderKey === 'desc',
+        visible: colOptions?.bitrate !== false,
+      },
+      {
+        colKey: 'duration',
+        label: 'Duration',
+        colWidth: 'minmax(72px, auto)',
+        isAsc: sortKey === 'duration' && orderKey === 'asc',
+        isDesc: sortKey === 'duration' && orderKey === 'desc',
+        visible: colOptions?.duration !== false,
+      },
+      {
+        colKey: 'userRating',
+        label: 'Rating',
+        colWidth: 'minmax(84px, auto)',
+        isAsc: sortKey === 'userRating' && orderKey === 'asc',
+        isDesc: sortKey === 'userRating' && orderKey === 'desc',
+        visible: colOptions?.userRating !== false,
+      },
+      {
+        colKey: 'isFavourite',
+        label: 'Favourite',
+        colWidth: 'minmax(72px, auto)',
+        isAsc: sortKey === 'isFavourite' && orderKey === 'asc',
+        isDesc: sortKey === 'isFavourite' && orderKey === 'desc',
+        visible: colOptions?.isFavourite !== false,
+      },
+      {
+        colKey: 'contextMenu',
+        label: '',
+        colWidth: '30px',
+        visible: true,
+      },
+    ];
+  }
+
   // FOLDERS
   else if (variant === 'folders') {
     tableVariant = 'folders';

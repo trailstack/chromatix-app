@@ -53,6 +53,7 @@ vi.mock('js/services/bridge', () => ({
   getAlbumTracks: vi.fn(),
   getPlaylistTracks: vi.fn(),
   getFolderItems: vi.fn(),
+  getAllTracks: vi.fn(),
   // models.app.js
   init: vi.fn(),
   plexLogin: vi.fn(),
@@ -224,6 +225,246 @@ describe('Testing "playerModel" store effects', () => {
       const state = store.getState().sessionModel;
       expect(state.playingTrackList).toBe(null);
       expect(state.playingTrackIndex).toBe(null);
+    });
+  });
+
+  //
+  // LOAD ALL TRACKS (tracks variant)
+  //
+
+  describe('playerLoadTracks', () => {
+    // Seeds the app model with the raw (server-order) track list. The view
+    // passes its own sorted entries separately, mirroring the list view.
+    const seedAllTracks = (tracks: typeof TRACKS, libraryId = 'lib-1') => {
+      store.dispatch.appModel.setAppState({
+        currentService: 'plex',
+        allTracks: tracks.map((t) => ({ ...t, libraryId })),
+        haveGotAllTracks: true,
+      });
+      seedSession({ currentLibrary: { libraryId } });
+    };
+
+    test('Falls back to the raw track list when no sorted view list is given', async () => {
+      seedAllTracks(TRACKS);
+
+      await store.dispatch.playerModel.playerLoadTracks({
+        trackIndex: 2,
+        isTrack: true,
+      });
+
+      expect(playerX.loadTrack).toHaveBeenCalledWith(
+        expect.objectContaining({ trackId: 'track-3', title: 'Track Three' }),
+        0,
+        true,
+        2
+      );
+      expect(store.getState().sessionModel.playingVariant).toBe('tracks');
+      expect(store.getState().sessionModel.playingTrackIndex).toBe(2);
+    });
+
+    test('Plays the clicked row from the sorted view list, not the raw server order', async () => {
+      // Raw server order is TRACKS, but the view is sorted descending. Clicking
+      // row 0 must play the first track in the sorted list (track-5) — the
+      // regression where the raw order was indexed instead played track-1.
+      seedAllTracks(TRACKS);
+      const sortedDesc = [...TRACKS].reverse();
+
+      await store.dispatch.playerModel.playerLoadTracks({
+        playingTracks: sortedDesc,
+        trackIndex: 0,
+        isTrack: true,
+      });
+
+      expect(playerX.loadTrack).toHaveBeenCalledWith(
+        expect.objectContaining({ trackId: 'track-5', title: 'Track Five' }),
+        0,
+        true,
+        0
+      );
+      expect(store.getState().sessionModel.playingTrackIndex).toBe(0);
+    });
+
+    test('Plays the clicked row from a partially reordered view list', async () => {
+      // View sorted alphabetically by title while the raw order differs.
+      seedAllTracks(TRACKS);
+      const sortedByTitle = [TRACKS[3], TRACKS[0], TRACKS[4], TRACKS[2], TRACKS[1]];
+
+      await store.dispatch.playerModel.playerLoadTracks({
+        playingTracks: sortedByTitle,
+        trackIndex: 3,
+        isTrack: true,
+      });
+
+      expect(playerX.loadTrack).toHaveBeenCalledWith(expect.objectContaining({ trackId: 'track-3' }), 0, true, 3);
+      expect(store.getState().sessionModel.playingTrackIndex).toBe(3);
+    });
+
+    test('Stores the provided sorted list and sequential keys in session state', async () => {
+      seedAllTracks(TRACKS);
+      const sortedDesc = [...TRACKS].reverse();
+
+      await store.dispatch.playerModel.playerLoadTracks({
+        playingTracks: sortedDesc,
+        trackIndex: 0,
+        isTrack: true,
+      });
+
+      const state = store.getState().sessionModel;
+      expect(state.playingTrackList?.map((t: { trackId: string }) => t.trackId)).toEqual([
+        'track-5',
+        'track-4',
+        'track-3',
+        'track-2',
+        'track-1',
+      ]);
+      expect(state.playingTrackCount).toBe(5);
+      expect(state.playingTrackKeys).toEqual([0, 1, 2, 3, 4]);
+    });
+
+    test('Falls back to the raw list filtered to the current library', async () => {
+      store.dispatch.appModel.setAppState({
+        currentService: 'plex',
+        haveGotAllTracks: true,
+        allTracks: [
+          ...TRACKS.slice(0, 3).map((t) => ({ ...t, libraryId: 'lib-1' })),
+          { ...TRACKS[3], libraryId: 'lib-2' },
+        ],
+      });
+      seedSession({ currentLibrary: { libraryId: 'lib-1' } });
+
+      await store.dispatch.playerModel.playerLoadTracks({
+        trackIndex: 1,
+        isTrack: true,
+      });
+
+      const state = store.getState().sessionModel;
+      expect(state.playingTrackList).toHaveLength(3);
+      expect(state.playingTrackList?.map((t: { trackId: string }) => t.trackId)).toEqual([
+        'track-1',
+        'track-2',
+        'track-3',
+      ]);
+    });
+
+    test('Passes shuffle flag to session state and starts with the clicked track', async () => {
+      seedAllTracks(TRACKS);
+      store.dispatch.sessionModel.setSessionState({ playingShuffle: true });
+
+      await store.dispatch.playerModel.playerLoadTracks({
+        playingTracks: TRACKS,
+        trackIndex: 2,
+        isTrack: true,
+      });
+
+      const state = store.getState().sessionModel;
+      expect(state.playingShuffle).toBe(true);
+      // Shuffle puts the clicked track first, so the loaded track is the clicked one.
+      expect(playerX.loadTrack).toHaveBeenCalledWith(expect.objectContaining({ trackId: 'track-3' }), 0, true, 0);
+    });
+  });
+
+  //
+  // EXTEND THE QUEUE AS TRACK PAGES LOAD (tracks variant)
+  //
+
+  describe('playerSyncTrackList', () => {
+    // Seeds a tracks-view queue for server-1 / lib-1 with the given rows.
+    const seedPlayingQueue = (tracks: typeof TRACKS, overrides: Record<string, unknown> = {}) => {
+      seedSession({
+        playingVariant: 'tracks',
+        playingServerId: 'server-1',
+        playingLibraryId: 'lib-1',
+        currentServer: { serverId: 'server-1' },
+        currentLibrary: { libraryId: 'lib-1' },
+        playingTrackList: tracks,
+        playingTrackKeys: tracks.map((_track, index) => index),
+        playingTrackIndex: 0,
+        playingTrackCount: tracks.length,
+        ...overrides,
+      });
+    };
+
+    test('Extends the queue with newly loaded tracks, keeping the current one', () => {
+      seedPlayingQueue(TRACKS.slice(0, 2), { playingTrackIndex: 1 });
+
+      store.dispatch.playerModel.playerSyncTrackList({ playingTracks: TRACKS });
+
+      const state = store.getState().sessionModel;
+      expect(state.playingTrackList.map((t: { trackId: string }) => t.trackId)).toEqual([
+        'track-1',
+        'track-2',
+        'track-3',
+        'track-4',
+        'track-5',
+      ]);
+      expect(state.playingTrackKeys).toEqual([0, 1, 2, 3, 4]);
+      expect(state.playingTrackIndex).toBe(1);
+      expect(state.playingTrackCount).toBe(5);
+      expect(playerX.loadTrack).not.toHaveBeenCalled();
+    });
+
+    test('Re-maps the current position when new tracks sort before it', () => {
+      // Partial view: sorted rows so far put track-4 at row 1.
+      seedPlayingQueue([TRACKS[1], TRACKS[3]], { playingTrackIndex: 1 });
+
+      store.dispatch.playerModel.playerSyncTrackList({ playingTracks: TRACKS });
+
+      const state = store.getState().sessionModel;
+      expect(state.playingTrackIndex).toBe(3);
+      expect(state.playingTrackList[state.playingTrackKeys[state.playingTrackIndex]].trackId).toBe('track-4');
+    });
+
+    test('Preserves the shuffled order and appends new tracks at the end', () => {
+      // Shuffle started on track-2, then track-1.
+      seedPlayingQueue(TRACKS.slice(0, 2), {
+        playingShuffle: true,
+        playingTrackKeys: [1, 0],
+        playingTrackIndex: 0,
+      });
+
+      store.dispatch.playerModel.playerSyncTrackList({ playingTracks: TRACKS.slice(0, 3) });
+
+      const state = store.getState().sessionModel;
+      expect(state.playingTrackKeys).toEqual([1, 0, 2]);
+      expect(state.playingTrackIndex).toBe(0);
+    });
+
+    test('Ignores lists that have not grown', () => {
+      seedPlayingQueue(TRACKS);
+
+      store.dispatch.playerModel.playerSyncTrackList({ playingTracks: TRACKS });
+
+      expect(store.getState().sessionModel.playingTrackList).toBe(TRACKS);
+    });
+
+    test('Ignores queues from another source variant', () => {
+      seedPlayingQueue(TRACKS.slice(0, 2), { playingVariant: 'album' });
+
+      store.dispatch.playerModel.playerSyncTrackList({ playingTracks: TRACKS });
+
+      expect(store.getState().sessionModel.playingTrackList).toHaveLength(2);
+    });
+
+    test('Ignores a queue belonging to another library', () => {
+      seedPlayingQueue(TRACKS.slice(0, 2), {
+        currentLibrary: { libraryId: 'lib-2' },
+      });
+
+      store.dispatch.playerModel.playerSyncTrackList({ playingTracks: TRACKS });
+
+      expect(store.getState().sessionModel.playingTrackList).toHaveLength(2);
+    });
+
+    test('Leaves the queue alone when the current track is no longer in the list', () => {
+      seedPlayingQueue([TRACKS[1], TRACKS[3]], { playingTrackIndex: 1 });
+
+      store.dispatch.playerModel.playerSyncTrackList({
+        playingTracks: TRACKS.filter((track) => track.trackId !== 'track-4'),
+      });
+
+      const state = store.getState().sessionModel;
+      expect(state.playingTrackList).toHaveLength(2);
+      expect(state.playingTrackIndex).toBe(1);
     });
   });
 

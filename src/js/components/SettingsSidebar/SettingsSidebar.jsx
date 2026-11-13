@@ -90,6 +90,7 @@ const LibrarySettings = ({ platformOpts }) => {
   const menuShowAlbums = useSelector(({ sessionModel }) => sessionModel.menuShowAlbums);
   const menuShowFolders = useSelector(({ sessionModel }) => sessionModel.menuShowFolders);
   const menuShowPlaylists = useSelector(({ sessionModel }) => sessionModel.menuShowPlaylists);
+  const menuShowTracks = useSelector(({ sessionModel }) => sessionModel.menuShowTracks);
 
   const menuItems = [
     {
@@ -129,6 +130,12 @@ const LibrarySettings = ({ platformOpts }) => {
       label: 'Playlists',
       state: menuShowPlaylists && platformOpts.menuPlaylists,
       disabled: !platformOpts.menuPlaylists,
+    },
+    {
+      key: 'menuShowTracks',
+      label: 'Tracks',
+      state: menuShowTracks && platformOpts.menuTracks,
+      disabled: !platformOpts.menuTracks,
     },
   ];
 

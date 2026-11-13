@@ -115,6 +115,7 @@ const sessionState = {
   menuShowAlbums: true,
   menuShowFolders: true,
   menuShowPlaylists: true,
+  menuShowTracks: true,
   menuShowAddPlaylist: true,
 
   menuShowArtistCollections: true,
@@ -174,6 +175,7 @@ const sessionState = {
   viewAlbums: 'grid',
   viewFolders: 'grid',
   viewPlaylists: 'grid',
+  viewTracks: 'list',
   viewArtistCollections: 'grid',
   viewArtistCollectionItems: 'grid',
   viewAlbumCollections: 'grid',
@@ -205,6 +207,7 @@ const sessionState = {
   sortAlbumTracks: {},
   sortFolders: 'sortOrder',
   sortPlaylists: 'title',
+  sortTracks: 'title',
   sortPlaylistTracks: {},
   sortArtistCollections: 'title',
   sortArtistCollectionItems: 'title',
@@ -236,6 +239,7 @@ const sessionState = {
   orderAlbums: 'asc',
   orderFolders: 'asc',
   orderPlaylists: 'asc',
+  orderTracks: 'asc',
   orderArtistCollections: 'asc',
   orderArtistCollectionItems: 'asc',
   orderAlbumCollections: 'asc',
@@ -423,6 +427,17 @@ const sessionState = {
   colPlaylistsLastPlayed: false,
   colPlaylistsUserRating: true,
   colPlaylistsIsFavourite: true,
+
+  // tracks
+  colTracksArtwork: true,
+  colTracksArtist: true,
+  colTracksAlbum: true,
+  colTracksReleaseDate: true,
+  colTracksCodec: false,
+  colTracksBitrate: false,
+  colTracksDuration: true,
+  colTracksUserRating: true,
+  colTracksIsFavourite: true,
 
   // playlist tracks
   colPlaylistArtwork: true,

@@ -4,7 +4,7 @@
 
 import * as jellyTools from 'js/services/jellyTools';
 import * as plexTools from 'js/services/plexTools';
-import { analyticsEvent, getLocalStorage } from 'js/utils';
+import { analyticsEvent, collectPaginated, getLocalStorage } from 'js/utils';
 import config from 'js/_config/config';
 import store from 'js/store/store';
 
@@ -25,6 +25,21 @@ const isLocal = import.meta.env.VITE_ENV === 'local';
 // [NOTE] this is a temporary flag just in case this change
 // causes any issues and needs to be reverted
 const refetchData = true;
+
+// ======================================================================
+// TRACK CACHE
+// ======================================================================
+
+// Number of tracks requested per page while loading a library's track list.
+const tracksPageSize = 500;
+
+// Libraries whose full track list has been loaded, so revisiting the Tracks
+// page serves from memory instead of re-downloading the library.
+const loadedTrackLibraries = new Set();
+
+// The in-flight track load, used to cancel a previous library's pages when the
+// user switches library mid-load.
+let getAllTracksRun = null;
 
 // ======================================================================
 // ABORT HANDLING
@@ -159,6 +174,10 @@ export const logout = () => {
   const currentService = store.getState().appModel.currentService;
   jellyTools.logout();
   plexTools.logout();
+  // Forget loaded libraries: the next login may be a different server, where
+  // library IDs can repeat, and its store starts empty.
+  loadedTrackLibraries.clear();
+  getAllTracksRun = null;
   store.dispatch.appModel.setLoggedOut();
   if (currentService) {
     analyticsEvent(toUpperFirst(currentService) + ' / Logout');
@@ -817,6 +836,90 @@ export const getAlbumTracks = (libraryId, albumId) => {
         });
     });
   }
+};
+
+// ======================================================================
+// GET ALL TRACKS
+// ======================================================================
+
+export const getAllTracks = () => {
+  if (!isStoreReady()) return;
+  const currentLibrary = store.getState().sessionModel.currentLibrary;
+  if (!currentLibrary) return;
+  const { libraryId } = currentLibrary;
+
+  // Serve an already-loaded library from memory, unless a library switch (which
+  // clears the store) removed its tracks, in which case reload it.
+  if (loadedTrackLibraries.has(libraryId)) {
+    const storedTracks = store.getState().appModel.allTracks || [];
+    if (storedTracks.some((track) => track.libraryId === libraryId)) {
+      // Any load for another library is no longer needed.
+      getAllTracksRun = null;
+      if (!store.getState().appModel.haveGotAllTracks) {
+        store.dispatch.appModel.setAppState({ haveGotAllTracks: true });
+      }
+      return;
+    }
+    loadedTrackLibraries.delete(libraryId);
+  }
+
+  // Don't start a duplicate load for the same library.
+  if (getAllTracksRun?.libraryId === libraryId) return;
+
+  const run = { id: (getAllTracksRun?.id || 0) + 1, libraryId };
+  getAllTracksRun = run;
+
+  console.log('%c--- bridge - getAllTracks ---', 'color:#f9743b;');
+
+  const accessToken = store.getState().sessionModel.currentServer.accessToken;
+  const currentService = store.getState().appModel.currentService;
+  const serverBaseUrl = store.getState().appModel.serverBaseUrl;
+  const userId = currentService === 'jellyfin' ? store.getState().appModel.currentAccount.userId : null;
+
+  // Drop any partial list for this library so pages can simply be appended.
+  const prevTracks = store.getState().appModel.allTracks || [];
+  store.dispatch.appModel.setAppState({
+    allTracks: prevTracks.filter((track) => track.libraryId !== libraryId),
+    haveGotAllTracks: false,
+  });
+
+  collectPaginated({
+    pageSize: tracksPageSize,
+    getId: (track) => String(track.trackId),
+    isCancelled: () => getAllTracksRun !== run,
+    fetchPage: (start, limit) =>
+      serviceTools[currentService].getAllTracks({
+        accessToken,
+        libraryId,
+        serverBaseUrl,
+        userId,
+        start,
+        limit,
+      }),
+    onPage: (tracks) => {
+      // A superseded run must not keep writing into the store.
+      if (getAllTracksRun !== run) return;
+      store.dispatch.appModel.appendAllTracks({ tracks });
+    },
+  })
+    .then(() => {
+      if (getAllTracksRun !== run) return;
+      loadedTrackLibraries.add(libraryId);
+      store.dispatch.appModel.setAppState({ haveGotAllTracks: true });
+    })
+    .catch((error) => {
+      if (getAllTracksRun !== run) return;
+      // Aborts come from logout/library switches, which reset the track state
+      // anyway — don't report them as failures.
+      if (error?.code === 'ERR_CANCELED' || error?.error?.code === 'ERR_CANCELED') return;
+      console.error(error);
+      analyticsEvent(toUpperFirst(currentService) + ' / Error / Get All Tracks');
+      // Stop the loading indicator even if the load failed part-way.
+      store.dispatch.appModel.setAppState({ haveGotAllTracks: true });
+    })
+    .finally(() => {
+      if (getAllTracksRun === run) getAllTracksRun = null;
+    });
 };
 
 // ======================================================================

@@ -43,6 +43,7 @@ const ViewList = ({ variant, ...props }) => {
     variant === 'artistTracks' ||
     variant === 'albumTracks' ||
     variant === 'playlistTracks' ||
+    variant === 'tracks' ||
     variant === 'folders'
   ) {
     return <ViewListTracks variant={variant} {...props} />;
@@ -145,6 +146,8 @@ const ViewListTracks = ({
   const playingPlaylistId = useSelector(({ sessionModel }) => sessionModel.playingPlaylistId);
   const playingFolderId = useSelector(({ sessionModel }) => sessionModel.playingFolderId);
 
+  const isTracksVariant = variant === 'tracks';
+
   const playingTrackList = useSelector(({ sessionModel }) => sessionModel.playingTrackList);
   const playingTrackIndex = useSelector(({ sessionModel }) => sessionModel.playingTrackIndex);
   const playingTrackKeys = useSelector(({ sessionModel }) => sessionModel.playingTrackKeys);
@@ -162,28 +165,40 @@ const ViewListTracks = ({
     colOptions
   );
 
-  const noArtworkVisible = tableVariant === 'albumTracks' || colOptions?.artwork === false;
+  const noArtworkVisible = tableVariant === 'albumTracks' || tableVariant === 'tracks' || colOptions?.artwork === false;
 
   const playTrack = useCallback(
     (trackVariant, trackIndex, restart) => {
       if (restart) {
-        // console.log(222, trackVariant, trackIndex, albumId, playlistId, folderId, playingOrder, sortKey);
-        dispatch.playerModel.playerLoadTrackItem({
-          playingVariant: lookupVariantFields[trackVariant].playVariant,
-          playingArtistId: artistId,
-          playingArtistName: artistName,
-          playingAlbumId: albumId,
-          playingPlaylistId: playlistId,
-          playingFolderId: folderId,
-          playingOrder: sortKey ? playingOrder : null,
-          playingTrackIndex: sortKey ? playingOrder[trackIndex] : trackIndex,
-        });
+        // For the tracks variant the view is sorted independently of the raw
+        // server order held in appModel.allTracks. Passing the sorted `entries`
+        // as the playing list makes `trackIndex` (the row clicked) map to the
+        // track on screen. Without it the player indexes into unsorted data and
+        // plays the wrong track.
+        if (trackVariant === 'tracks') {
+          dispatch.playerModel.playerLoadTrackItem({
+            playingVariant: lookupVariantFields[trackVariant].playVariant,
+            playingTracks: entries,
+            playingTrackIndex: trackIndex,
+          });
+        } else {
+          dispatch.playerModel.playerLoadTrackItem({
+            playingVariant: lookupVariantFields[trackVariant].playVariant,
+            playingArtistId: artistId,
+            playingArtistName: artistName,
+            playingAlbumId: albumId,
+            playingPlaylistId: playlistId,
+            playingFolderId: folderId,
+            playingOrder: sortKey ? playingOrder : null,
+            playingTrackIndex: sortKey && playingOrder ? playingOrder[trackIndex] : trackIndex,
+          });
+        }
       } else {
         dispatch.playerModel.playerResume();
       }
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [dispatch, albumId, playlistId, folderId, playingOrder, sortKey]
+    [dispatch, albumId, playlistId, folderId, playingOrder, sortKey, orderKey, entries]
   );
 
   const pauseTrack = useCallback(() => {
@@ -192,6 +207,9 @@ const ViewListTracks = ({
 
   const isTrackLoaded = useCallback(
     (trackVariant, trackId) => {
+      if (trackVariant === 'tracks') {
+        return playingVariant === 'tracks' && playingTrackCurrent.trackId === trackId;
+      }
       return (
         playingVariant === lookupVariantFields[trackVariant].playVariant &&
         (playingAlbumId === albumId || (!playingAlbumId && !albumId)) &&
@@ -229,7 +247,7 @@ const ViewListTracks = ({
 
     // Determine whether to show disc numbers
     const isSorted = sortKey && !sortKey.startsWith('sortOrder');
-    const showDiscNumbers = !isSorted && discCount > 1;
+    const showDiscNumbers = !isSorted && discCount > 1 && !isTracksVariant;
 
     // Drag is only available for playlist tracks in default sort order
     const isDraggable = tableVariant === 'playlistTracks' && !isSorted;
@@ -1086,8 +1104,8 @@ const TrackRow = ({
 
   const contextEntries = useContextMenuTracks(entry, {
     playlistId: tableVariant === 'playlistTracks' ? playlistId : null,
-    showArtist: tableVariant !== 'artistTracks',
-    showAlbum: tableVariant !== 'albumTracks',
+    showArtist: tableVariant !== 'artistTracks' && tableVariant !== 'tracks',
+    showAlbum: tableVariant !== 'albumTracks' && tableVariant !== 'tracks',
   });
 
   return (
@@ -1371,6 +1389,11 @@ const lookupVariantFields = {
     ratingType: 'track',
     ratingKey: 'trackId',
     playVariant: 'playlists',
+  },
+  tracks: {
+    ratingType: 'track',
+    ratingKey: 'trackId',
+    playVariant: 'tracks',
   },
   collections: {
     ratingType: 'collection',

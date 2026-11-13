@@ -1,4 +1,5 @@
 export { default as analyticsEvent } from './analyticsEvent';
+export { default as collectPaginated } from './collectPaginated';
 export { default as decimalMultiplier } from './decimalMultiplier';
 export { default as decimalToHex } from './decimalToHex';
 export { default as durationToStringLong } from './durationToStringLong';

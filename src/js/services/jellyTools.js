@@ -58,6 +58,9 @@ const endpointConfig = {
     getAlbumDetails: (serverBaseUrl, albumId) => `${serverBaseUrl}/Items/${albumId}`,
     getAlbumTracks: (serverBaseUrl, userId) => `${serverBaseUrl}/Users/${userId}/Items`,
   },
+  track: {
+    getAllTracks: (serverBaseUrl, userId) => `${serverBaseUrl}/Users/${userId}/Items`,
+  },
   folder: {
     getFolderItems: null,
   },
@@ -759,6 +762,58 @@ export const getAlbumTracks = ({ accessToken, albumId, libraryId, serverBaseUrl,
       reject({
         code: 'jellyfin.getAlbumTracks.2',
         message: 'Failed to get album tracks: ' + error?.message,
+        error: error,
+      });
+    }
+  });
+};
+
+// ======================================================================
+// GET ALL TRACKS
+// ======================================================================
+
+export const getAllTracks = ({ accessToken, libraryId, serverBaseUrl, userId, start = 0, limit = 500 }) => {
+  return new Promise((resolve, reject) => {
+    try {
+      const endpoint = endpointConfig.track.getAllTracks(serverBaseUrl, userId);
+      const controller = new AbortController();
+      abortControllers.push(controller);
+
+      axios
+        .get(endpoint, {
+          headers: getRequestHeaders(accessToken),
+          signal: controller.signal,
+          params: {
+            ParentId: libraryId,
+            IncludeItemTypes: 'Audio',
+            Recursive: true,
+            SortBy: 'Album,SortName',
+            SortOrder: 'Ascending',
+            Fields: trackFields,
+            StartIndex: start,
+            Limit: limit,
+          },
+        })
+        .then((response) => {
+          const items = jellyTranspose.transposeTrackArray(response, libraryId, serverBaseUrl, accessToken);
+          const totalRecordCount = response?.data?.TotalRecordCount;
+          const total = totalRecordCount !== undefined && totalRecordCount !== null ? Number(totalRecordCount) : null;
+          resolve({ items, total });
+        })
+        .catch((error) => {
+          reject({
+            code: 'jellyfin.getAllTracks.1',
+            message: 'Failed to get all tracks: ' + error?.message,
+            error: error,
+          });
+        })
+        .finally(() => {
+          abortControllers = abortControllers.filter((ctrl) => ctrl !== controller);
+        });
+    } catch (error) {
+      reject({
+        code: 'jellyfin.getAllTracks.2',
+        message: 'Failed to get all tracks: ' + error?.message,
         error: error,
       });
     }

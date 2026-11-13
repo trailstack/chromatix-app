@@ -46,6 +46,7 @@ const SideBar = () => {
   const menuShowAlbums = useSelector(({ sessionModel }) => sessionModel.menuShowAlbums);
   const menuShowFolders = useSelector(({ sessionModel }) => sessionModel.menuShowFolders);
   const menuShowPlaylists = useSelector(({ sessionModel }) => sessionModel.menuShowPlaylists);
+  const menuShowTracks = useSelector(({ sessionModel }) => sessionModel.menuShowTracks);
   const menuShowArtistCollections = useSelector(({ sessionModel }) => sessionModel.menuShowArtistCollections);
   const menuShowAlbumCollections = useSelector(({ sessionModel }) => sessionModel.menuShowAlbumCollections);
   const menuShowArtistGenres = useSelector(({ sessionModel }) => sessionModel.menuShowArtistGenres);
@@ -66,7 +67,8 @@ const SideBar = () => {
     (menuShowAlbumArtists && platformOpts.menuAlbumArtists) ||
     (menuShowAlbums && platformOpts.menuAlbums) ||
     (menuShowFolders && platformOpts.menuFolders) ||
-    (menuShowPlaylists && platformOpts.menuPlaylists);
+    (menuShowPlaylists && platformOpts.menuPlaylists) ||
+    (menuShowTracks && platformOpts.menuTracks);
 
   const browseIsVisible =
     (menuShowArtistCollections && platformOpts.menuArtistCollections) ||
@@ -201,6 +203,21 @@ const SideBar = () => {
                       </span>
                     )}
                     Playlists
+                  </NavLink>
+                )}
+                {menuShowTracks && platformOpts.menuTracks && (
+                  <NavLink
+                    className={style.link}
+                    activeClassName={style.linkActive}
+                    to={`/libraries/${currentLibraryId}/tracks`}
+                    draggable="false"
+                  >
+                    {menuShowIcons && (
+                      <span className={style.icon}>
+                        <Icon icon="MusicNoteSingleIcon" cover stroke />
+                      </span>
+                    )}
+                    Tracks
                   </NavLink>
                 )}
               </>

@@ -15,6 +15,7 @@ export { default as useGetDownloadLinks } from './useGetDownloadLinks';
 export { default as useGetFolderItems } from './useGetFolderItems';
 export { default as useGetGlobalData } from './useGetGlobalData';
 export { default as useGetPlaylistArray } from './useGetPlaylistArray';
+export { default as useGetTrackArray } from './useGetTrackArray';
 export { default as useGetPlaylistDetail } from './useGetPlaylistDetail';
 export { default as useGetQueuedTracks } from './useGetQueuedTracks';
 export { default as useGotRequiredData } from './useGotRequiredData';

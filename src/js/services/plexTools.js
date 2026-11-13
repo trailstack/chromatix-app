@@ -74,6 +74,9 @@ const endpointConfig = {
     getAlbumDetails: (serverBaseUrl, albumId) => `${serverBaseUrl}/library/metadata/${albumId}`,
     getAlbumTracks: (serverBaseUrl, albumId) => `${serverBaseUrl}/library/metadata/${albumId}/children`,
   },
+  track: {
+    getAllTracks: (serverBaseUrl, libraryId) => `${serverBaseUrl}/library/sections/${libraryId}/all`,
+  },
   folder: {
     getFolderItems: (serverBaseUrl, libraryId) => `${serverBaseUrl}/library/sections/${libraryId}/folder`,
   },
@@ -1127,6 +1130,58 @@ export const getAlbumTracks = ({ accessToken, albumId, libraryId, serverBaseUrl,
       reject({
         code: 'plex.getAlbumTracks.2',
         message: 'Failed to get album tracks: ' + error?.message,
+        error: error,
+      });
+    }
+  });
+};
+
+// ======================================================================
+// GET ALL TRACKS
+// ======================================================================
+
+export const getAllTracks = ({ accessToken, libraryId, serverBaseUrl, start = 0, limit = 500 }) => {
+  return new Promise((resolve, reject) => {
+    try {
+      const endpoint = endpointConfig.track.getAllTracks(serverBaseUrl, libraryId);
+      const controller = new AbortController();
+      abortControllers.push(controller);
+
+      axios
+        .get(endpoint, {
+          headers: {
+            ...getRequestHeaders(accessToken),
+            // Plex paginates this endpoint via container headers.
+            'X-Plex-Container-Start': String(start),
+            'X-Plex-Container-Size': String(limit),
+          },
+          params: {
+            type: 10,
+            excludeFields: trackExcludeFields,
+            excludeElements: excludeElements,
+          },
+          signal: controller.signal,
+        })
+        .then((response) => {
+          const items = plexTranspose.transposeTrackArray(response, libraryId, serverBaseUrl, accessToken);
+          const totalSize = response?.data?.MediaContainer?.totalSize;
+          const total = totalSize !== undefined && totalSize !== null ? Number(totalSize) : null;
+          resolve({ items, total });
+        })
+        .catch((error) => {
+          reject({
+            code: 'plex.getAllTracks.1',
+            message: 'Failed to get all tracks: ' + error?.message,
+            error: error,
+          });
+        })
+        .finally(() => {
+          abortControllers = abortControllers.filter((ctrl) => ctrl !== controller);
+        });
+    } catch (error) {
+      reject({
+        code: 'plex.getAllTracks.2',
+        message: 'Failed to get all tracks: ' + error?.message,
         error: error,
       });
     }

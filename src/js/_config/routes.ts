@@ -131,6 +131,13 @@ export const authRoutes = [
     component: 'PlaylistDetail',
   },
 
+  // tracks
+  {
+    path: '/libraries/:libraryId/tracks',
+    exact: true,
+    component: 'TrackArray',
+  },
+
   // artist collections
   {
     path: '/libraries/:libraryId/artist-collections',

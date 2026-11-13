@@ -40,6 +40,8 @@ export { default as FolderItems } from './FolderItems';
 export { default as PlaylistArray } from './PlaylistArray';
 export { default as PlaylistDetail } from './PlaylistDetail';
 
+export { default as TrackArray } from './TrackArray';
+
 export { default as GenericTagArray } from './GenericTagArray';
 export { default as GenericTagItems } from './GenericTagItems';
 
