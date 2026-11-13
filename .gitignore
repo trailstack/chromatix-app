@@ -20,6 +20,7 @@ tests/.auth/
 # Builds
 build/
 dist/
+output.json
 .vercel
 
 # Local-only symlinks
