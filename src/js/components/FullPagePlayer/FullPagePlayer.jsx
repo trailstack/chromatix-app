@@ -28,6 +28,7 @@ export const FullPagePlayer = () => {
 
   return (
     <main className={style.wrap} aria-label="Now playing" data-allow-key-controls>
+      <NowPlayingBackground />
       <div className={style.topSpacer}></div>
       <div>
         <NowPlaying />
@@ -47,6 +48,29 @@ export const FullPagePlayer = () => {
         </div>
       </div>
     </main>
+  );
+};
+
+const NowPlayingBackground = () => {
+  const fullPageTheme = useSelector(({ sessionModel }) => sessionModel.fullPageTheme);
+
+  const playingTrackList = useSelector(({ sessionModel }) => sessionModel.playingTrackList);
+  const playingTrackIndex = useSelector(({ sessionModel }) => sessionModel.playingTrackIndex);
+  const playingTrackKeys = useSelector(({ sessionModel }) => sessionModel.playingTrackKeys);
+  const trackCurrent = playingTrackList?.[playingTrackKeys[playingTrackIndex]];
+
+  // A blurred, scaled-up version of the current track's artwork washes the full-page player
+  // background in the album's colours, so the background is themed by the currently playing art.
+  // Falls back to the themed solid background when there's no artwork or matching is disabled.
+  if (!fullPageTheme) return null;
+
+  const thumbSrc = trackCurrent?.thumbMd || trackCurrent?.thumbSm;
+  if (!thumbSrc) return null;
+
+  return (
+    <div className={style.background}>
+      <ArtworkImage src={thumbSrc} alt="" />
+    </div>
   );
 };
 

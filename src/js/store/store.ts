@@ -54,8 +54,12 @@ const saveDataDebounce: number = 100;
 const saveData = (): void => {
   clearTimeout(saveDataTimeout);
   saveDataTimeout = setTimeout(function () {
-    savePersistentData();
-    saveSessionData();
+    try {
+      savePersistentData();
+      saveSessionData();
+    } catch (error) {
+      // browser does not support local storage, or storage is full (e.g. a very large playing queue)
+    }
   }, saveDataDebounce);
 };
 

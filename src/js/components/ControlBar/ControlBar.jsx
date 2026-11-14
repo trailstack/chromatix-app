@@ -372,7 +372,7 @@ const FullPageMenu = () => {
           variant: 'divider',
         },
         {
-          label: 'Match your theme',
+          label: 'Match album artwork',
           attr: 'fullPageTheme',
           checked: fullPageTheme,
         },

@@ -167,6 +167,7 @@ const sessionState = {
   fullPageCodec: true,
   fullPageBitrate: true,
   fullPageTheme: true,
+  fullPageThemeColor: null,
 
   // VIEW OPTIONS
 

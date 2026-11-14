@@ -5,6 +5,7 @@ export { default as decimalToHex } from './decimalToHex';
 export { default as durationToStringLong } from './durationToStringLong';
 export { default as durationToStringMed } from './durationToStringMed';
 export { default as durationToStringShort } from './durationToStringShort';
+export { default as extractDominantColor } from './extractDominantColor';
 export { default as formatRecentDate } from './formatRecentDate';
 export { default as formatReleaseYear } from './formatReleaseYear';
 export { default as getColorTokens } from './getColorTokens';
