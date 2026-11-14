@@ -24,6 +24,12 @@ const useContextMenuTracks = (track, { playlistId, showArtist = true, showAlbum 
 
   return [
     {
+      variant: 'action',
+      label: 'Play next',
+      icon: 'QueueBeforeIcon',
+      onSelect: () => store.dispatch.playerModel.playerPlayNext({ track }),
+    },
+    {
       variant: 'submenu',
       label: 'Add to playlist',
       icon: 'PlusCircleIcon',

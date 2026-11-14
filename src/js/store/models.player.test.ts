@@ -430,6 +430,7 @@ describe('Testing "playerModel" store effects', () => {
         playingTrackKeys: tracks.map((_track, index) => index),
         playingTrackIndex: 0,
         playingTrackCount: tracks.length,
+        playingTrackSourceCount: tracks.length,
         ...overrides,
       });
     };
@@ -515,6 +516,189 @@ describe('Testing "playerModel" store effects', () => {
       const state = store.getState().sessionModel;
       expect(state.playingTrackList).toHaveLength(2);
       expect(state.playingTrackIndex).toBe(1);
+    });
+
+    test('Preserves manually queued "Play next" entries when the source list extends', () => {
+      // Use a track that's NOT in the library so it stays as a true extra.
+      const extraTrack = {
+        trackId: 'track-99',
+        title: 'Extra Track',
+        artist: 'Artist X',
+        src: 'https://server.local/extra.mp3',
+        codec: 'mp3',
+      };
+      seedPlayingQueue(TRACKS.slice(0, 2));
+      store.dispatch.sessionModel.setSessionState({
+        playingTrackList: [TRACKS[0], TRACKS[1], extraTrack],
+        playingTrackKeys: [0, 1, 3],
+        playingTrackIndex: 1,
+        playingTrackCount: 3,
+        playingTrackSourceCount: 2,
+      });
+
+      store.dispatch.playerModel.playerSyncTrackList({ playingTracks: TRACKS });
+
+      const state = store.getState().sessionModel;
+      expect(state.playingTrackList.map((t: { trackId: string }) => t.trackId)).toEqual([
+        'track-1',
+        'track-2',
+        'track-3',
+        'track-4',
+        'track-5',
+        'track-99',
+      ]);
+      // The manual entry is kept immediately after the current track (keys[1]=1=track-2)
+      // so the extra at keys[2] plays right after the current one.
+      expect(state.playingTrackKeys).toEqual([0, 1, 5, 2, 3, 4]);
+      expect(state.playingTrackSourceCount).toBe(5);
+    });
+
+    test('Keeps "Play next" entries after current when current is a source track (shuffle off)', () => {
+      const extraTrack = {
+        trackId: 'track-88',
+        title: 'Another Extra',
+        artist: 'Artist Y',
+        src: 'https://server.local/extra2.mp3',
+        codec: 'mp3',
+      };
+      seedPlayingQueue(TRACKS.slice(0, 2));
+      store.dispatch.sessionModel.setSessionState({
+        playingTrackList: [TRACKS[0], TRACKS[1], extraTrack],
+        playingTrackKeys: [0, 1, 3],
+        playingTrackIndex: 0,
+        playingTrackCount: 3,
+        playingTrackSourceCount: 2,
+      });
+
+      store.dispatch.playerModel.playerSyncTrackList({ playingTracks: TRACKS });
+
+      const state = store.getState().sessionModel;
+      // Extras stay after current (track-1 at index 0)
+      expect(state.playingTrackKeys[1]).toBe(5); // extra at index 5
+      expect(state.playingTrackIndex).toBe(0);
+    });
+  });
+
+  describe('playerPlayNext', () => {
+    test('Inserts the track immediately after the current position in the queue', () => {
+      seedSession({
+        playingTrackIndex: 1,
+        playingTrackKeys: [0, 1, 2],
+        playingTrackList: TRACKS.slice(0, 3),
+        playingTrackCount: 3,
+      });
+
+      store.dispatch.playerModel.playerPlayNext({ track: TRACKS[4] });
+
+      const state = store.getState().sessionModel;
+      expect(state.playingTrackList.map((t: { trackId: string }) => t.trackId)).toEqual([
+        'track-1',
+        'track-2',
+        'track-3',
+        'track-5',
+      ]);
+      expect(state.playingTrackKeys).toEqual([0, 1, 3, 2]);
+      expect(state.playingTrackIndex).toBe(1);
+      expect(state.playingTrackCount).toBe(4);
+      expect(playerX.loadTrack).not.toHaveBeenCalled();
+    });
+
+    test('Most recently requested "Play next" plays first', () => {
+      seedSession({
+        playingTrackIndex: 0,
+        playingTrackKeys: [0, 1, 2],
+        playingTrackList: TRACKS.slice(0, 3),
+        playingTrackCount: 3,
+      });
+
+      store.dispatch.playerModel.playerPlayNext({ track: TRACKS[4] });
+      store.dispatch.playerModel.playerPlayNext({ track: TRACKS[3] });
+
+      const state = store.getState().sessionModel;
+      // Keys remap: [0, 4, 3, 1, 2] means next is list[4]=track-4, then list[3]=track-5
+      expect(state.playingTrackKeys).toEqual([0, 4, 3, 1, 2]);
+      expect(state.playingTrackList[state.playingTrackKeys[state.playingTrackIndex + 1]].trackId).toBe('track-4');
+      // The two extra tracks are at the end of the list
+      expect(state.playingTrackList[3].trackId).toBe('track-5');
+      expect(state.playingTrackList[4].trackId).toBe('track-4');
+    });
+
+    test('Starts playback immediately when no queue exists', () => {
+      seedSession({
+        playingTrackIndex: null,
+        playingTrackList: null,
+        playingTrackKeys: null,
+        playingTrackCount: null,
+      });
+
+      store.dispatch.playerModel.playerPlayNext({ track: TRACKS[2] });
+
+      expect(playerX.loadTrack).toHaveBeenCalledWith(expect.objectContaining({ trackId: 'track-3' }), 0, true, 0);
+      const state = store.getState().sessionModel;
+      expect(state.playingTrackIndex).toBe(0);
+    });
+
+    test('Strips queue-row metadata fields from the track', () => {
+      seedSession({
+        playingTrackIndex: 0,
+        playingTrackKeys: [0],
+        playingTrackList: [TRACKS[0]],
+        playingTrackCount: 1,
+      });
+
+      const trackWithMeta = { ...TRACKS[1], rowType: 'track', playIndex: 5 };
+      store.dispatch.playerModel.playerPlayNext({ track: trackWithMeta });
+
+      const state = store.getState().sessionModel;
+      const queuedTrack = state.playingTrackList[1];
+      expect(queuedTrack).not.toHaveProperty('rowType');
+      expect(queuedTrack).not.toHaveProperty('playIndex');
+    });
+
+    test('Updates playingOrder so extras are reachable in non-shuffle mode', () => {
+      seedSession({
+        playingTrackIndex: 0,
+        playingTrackKeys: [0, 1, 2],
+        playingTrackList: TRACKS.slice(0, 3),
+        playingTrackCount: 3,
+        playingOrder: [0, 1, 2],
+      });
+
+      store.dispatch.playerModel.playerPlayNext({ track: TRACKS[4] });
+
+      const state = store.getState().sessionModel;
+      expect(state.playingOrder).toEqual([0, 3, 1, 2]);
+      // Extra at key 3 is now in order right after current
+      expect(state.playingTrackList[state.playingOrder[1]].trackId).toBe('track-5');
+    });
+
+    test('Calls playerSyncGaplessQueue to preload the new next track', () => {
+      seedSession({
+        playingTrackIndex: 0,
+        playingTrackKeys: [0, 1],
+        playingTrackList: TRACKS,
+        playingTrackCount: 2,
+      });
+
+      store.dispatch.playerModel.playerPlayNext({ track: TRACKS[4] });
+
+      expect(playerX.syncGaplessQueue).toHaveBeenCalledTimes(1);
+    });
+
+    test('Does not mutate the original arrays', () => {
+      const originalList = [...TRACKS];
+      const originalKeys = [0, 1, 2];
+      seedSession({
+        playingTrackIndex: 0,
+        playingTrackKeys: originalKeys,
+        playingTrackList: TRACKS,
+        playingTrackCount: 3,
+      });
+
+      store.dispatch.playerModel.playerPlayNext({ track: TRACKS[4] });
+
+      expect(store.getState().sessionModel.playingTrackList).not.toBe(originalList);
+      expect(store.getState().sessionModel.playingTrackKeys).not.toBe(originalKeys);
     });
   });
 
@@ -747,6 +931,49 @@ describe('Testing "playerModel" store effects', () => {
       // real track 2 was playing (keys[2] of the shuffled order) and remains selected
       expect(state.playingTrackIndex).toBe(2);
       expect(analyticsEvent).toHaveBeenCalledWith('Plex / Music / Shuffle Off');
+    });
+
+    test('Keeps "Play next" extras when shuffling on (current is a source track)', () => {
+      // 3 source tracks + 1 extra (track-5 at list index 3), current is track-1 (keys[0]=0)
+      seedSession({
+        playingTrackIndex: 0,
+        playingTrackKeys: [0, 1, 2, 3],
+        playingTrackList: [TRACKS[0], TRACKS[1], TRACKS[2], TRACKS[4]],
+        playingTrackCount: 4,
+        playingTrackSourceCount: 3,
+      });
+
+      store.dispatch.playerModel.playerShuffleToggle();
+
+      const state = store.getState().sessionModel;
+      expect(state.playingShuffle).toBe(true);
+      // Extra key (3, track-5) stays adjacent to the current track
+      const currentKey = state.playingTrackKeys[state.playingTrackIndex];
+      const extraKey = state.playingTrackKeys.find((k: number) => k >= 3);
+      expect(extraKey).toBeDefined();
+      // The extra is right after the current track in the keys array
+      const currentPos = state.playingTrackKeys.indexOf(currentKey);
+      expect(state.playingTrackKeys[currentPos + 1]).toBe(extraKey);
+    });
+
+    test('Keeps "Play next" extras when shuffling off (current is a source track)', () => {
+      // 3 source tracks + 1 extra, shuffle on, current is track-1 (keys[0]=2)
+      seedSession({
+        playingShuffle: true,
+        playingTrackIndex: 0,
+        playingTrackKeys: [2, 0, 1, 3],
+        playingTrackList: [TRACKS[0], TRACKS[1], TRACKS[2], TRACKS[4]],
+        playingTrackCount: 4,
+        playingTrackSourceCount: 3,
+      });
+
+      store.dispatch.playerModel.playerShuffleToggle();
+
+      const state = store.getState().sessionModel;
+      expect(state.playingShuffle).toBe(false);
+      // Source tracks in order, extras after current (track-3 at index 2)
+      expect(state.playingTrackKeys).toEqual([0, 1, 2, 3]);
+      expect(state.playingTrackIndex).toBe(2);
     });
   });
 

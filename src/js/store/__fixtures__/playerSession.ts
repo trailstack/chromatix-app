@@ -47,6 +47,7 @@ export const basePlayingSession = {
   playingTrackKeys: [0, 1, 2, 3, 4],
   playingTrackIndex: 0,
   playingTrackCount: TRACKS.length,
+  playingTrackSourceCount: TRACKS.length,
   playingTrackProgress: 0,
   playingOrder: null,
   playingRepeatAll: false,

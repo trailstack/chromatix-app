@@ -581,30 +581,78 @@ const effects = (dispatch) => ({
     if (session.playingLibraryId !== session.currentLibrary?.libraryId) return;
     if (session.playingServerId !== session.currentServer?.serverId) return;
 
-    // Only react to the list growing; re-sorts of the same rows are ignored.
-    if (playingTracks.length <= playingTrackList.length) return;
+    // Only react to the source list growing; re-sorts are ignored.
+    const sourceCount = session.playingTrackSourceCount ?? playingTrackList.length;
+    if (playingTracks.length <= sourceCount) return;
 
     const currentTrack = playingTrackList[playingTrackKeys[session.playingTrackIndex]];
     if (!currentTrack) return;
 
-    // Sorting inserts new tracks between existing rows, so old indexes no longer
-    // point at the same tracks. Rebuild the queue by track identity instead.
+    // Build new source index map.
     const newIndexById = new Map();
     playingTracks.forEach((track, index) => {
       newIndexById.set(String(track.trackId), index);
     });
-    const currentNewIndex = newIndexById.get(String(currentTrack.trackId));
+
+    // Identify extras (manual "Play next" entries not yet in source).
+    // Separate into "already in new source" and "truly new" for dedup.
+    const allExtras = playingTrackList.slice(sourceCount);
+    const sourceIdxById = new Map();
+    playingTracks.forEach((t, i) => sourceIdxById.set(String(t.trackId), i));
+    const replacedExtras = [];
+    const newExtras = [];
+    allExtras.forEach((extra) => {
+      if (sourceIdxById.has(String(extra.trackId))) {
+        replacedExtras.push(extra);
+      } else {
+        newExtras.push(extra);
+      }
+    });
+
+    // Offsets in the new list:
+    // source tracks: 0 .. playingTracks.length-1
+    // replaced extras: playingTracks.length .. playingTracks.length + replacedExtras.length - 1
+    // new extras: baseEndNew + 0 ..
+    const replacedBase = playingTracks.length;
+    const newBase = replacedBase + replacedExtras.length;
+
+    // Map an old list index to its new position.
+    const mapOldIndex = (oldIndex) => {
+      if (oldIndex < sourceCount) {
+        const track = playingTrackList[oldIndex];
+        if (!track) return undefined;
+        return newIndexById.get(String(track.trackId));
+      }
+      // Extra entry — find which bucket it falls into.
+      const extraPos = oldIndex - sourceCount;
+      if (extraPos < replacedExtras.length) {
+        return replacedBase + extraPos;
+      }
+      const newExtraPos = extraPos - replacedExtras.length;
+      if (newExtraPos < newExtras.length) {
+        return newBase + newExtraPos;
+      }
+      return undefined;
+    };
+
+    // Find current track's new index.
+    const currentOldListIndex = playingTrackKeys[session.playingTrackIndex];
+    const currentNewIndex = mapOldIndex(currentOldListIndex);
     if (currentNewIndex === undefined) return;
+
+    // Determine the list of extra keys and the offset where extras start.
+    const extraKeys = Array.from({ length: allExtras.length }, (_, i) => mapOldIndex(sourceCount + i)).filter(
+      (k) => k !== undefined
+    );
+    const extraStartOffset = extraKeys.length > 0 ? Math.min(...extraKeys) : replacedBase;
 
     let newKeys;
     let newCurrentIndex;
 
     if (session.playingShuffle) {
-      // Keep the shuffled order already played, then append the new tracks in a
-      // shuffled order of their own.
-      newKeys = playingTrackKeys
-        .map((oldIndex) => newIndexById.get(String(playingTrackList[oldIndex]?.trackId)))
-        .filter((index) => index !== undefined);
+      // Keep the shuffled order already played, then append the new tracks in
+      // a shuffled order of their own.
+      newKeys = playingTrackKeys.map(mapOldIndex).filter((index) => index !== undefined);
       const queued = new Set(newKeys);
       const freshKeys = playingTracks.map((_track, index) => index).filter((index) => !queued.has(index));
       for (let i = freshKeys.length - 1; i > 0; i--) {
@@ -614,17 +662,39 @@ const effects = (dispatch) => ({
       newKeys = [...newKeys, ...freshKeys];
       newCurrentIndex = newKeys.indexOf(currentNewIndex);
     } else {
-      // The view is sorted by the same comparator as before, so the new rows
-      // simply slot into the existing order: sequential keys still hold.
-      newKeys = playingTracks.map((_track, index) => index);
-      newCurrentIndex = currentNewIndex;
+      // The view is sorted by the same comparator as before. Keep extras
+      // immediately after the current track so manual "Play next" entries stay
+      // in position as the source list extends around them.
+      const sourceKeys = playingTracks.map((_track, index) => index);
+
+      if (currentNewIndex < extraStartOffset) {
+        // Current is a source track: splice extras after it.
+        sourceKeys.splice(currentNewIndex + 1, 0, ...extraKeys);
+        newKeys = sourceKeys;
+        newCurrentIndex = currentNewIndex;
+      } else {
+        // Current is an extra: put extras first, then source.
+        newKeys = [...extraKeys, ...sourceKeys];
+        newCurrentIndex = newKeys.indexOf(currentNewIndex);
+      }
     }
+
+    // Build the final list: source + deduplicated extras.
+    const newList = [
+      ...playingTracks,
+      ...replacedExtras.map((e) => {
+        const srcIdx = sourceIdxById.get(String(e.trackId));
+        return srcIdx !== undefined ? playingTracks[srcIdx] : e;
+      }),
+      ...newExtras,
+    ];
 
     dispatch.sessionModel.setSessionState({
       playingTrackKeys: newKeys,
-      playingTrackList: playingTracks,
+      playingTrackList: newList,
       playingTrackIndex: newCurrentIndex,
-      playingTrackCount: playingTracks.length,
+      playingTrackCount: newList.length,
+      playingTrackSourceCount: playingTracks.length,
     });
     // keep the gapless engine's queue mirror aligned with the extended queue
     dispatch.playerModel.playerSyncGaplessQueue();
@@ -639,6 +709,7 @@ const effects = (dispatch) => ({
     });
     dispatch.sessionModel.setSessionState({
       ...payload,
+      playingTrackSourceCount: payload.playingTrackList?.length ?? null,
     });
     // keep the gapless engine's queue mirror aligned with the new queue
     dispatch.playerModel.playerSyncGaplessQueue();
@@ -890,6 +961,55 @@ const effects = (dispatch) => ({
     }
   },
 
+  playerPlayNext({ track }, rootState) {
+    // console.log('%c--- playerPlayNext ---', 'color:#5c16b1');
+    if (!track) return;
+
+    const { playingTrackList, playingTrackKeys, playingTrackIndex } = rootState.sessionModel;
+
+    // No active queue yet — start playback immediately.
+    if (!playingTrackList || !playingTrackKeys || playingTrackIndex == null) {
+      dispatch.playerModel.playerLoadTracks({
+        playingTracks: [track],
+        trackIndex: 0,
+        isTrack: true,
+      });
+      return;
+    }
+
+    // Sanitise: strip queue-row metadata so the stored track stays clean.
+    const queuedTrack = { ...track };
+    delete queuedTrack.rowType;
+    delete queuedTrack.playIndex;
+
+    const list = [...playingTrackList, queuedTrack];
+    const insertKey = list.length - 1;
+    const keys = [...playingTrackKeys];
+    keys.splice(playingTrackIndex + 1, 0, insertKey);
+
+    // Update playingOrder so shuffle-off keeps the new track reachable.
+    const playingOrder = rootState.sessionModel.playingOrder;
+    const order = playingOrder
+      ? (() => {
+          const po = [...playingOrder];
+          const currentKey = playingTrackKeys[playingTrackIndex];
+          const pos = po.indexOf(currentKey);
+          po.splice(pos >= 0 ? pos + 1 : po.length, 0, insertKey);
+          return po;
+        })()
+      : undefined;
+
+    dispatch.sessionModel.setSessionState({
+      playingTrackList: list,
+      playingTrackKeys: keys,
+      playingTrackCount: list.length,
+      ...(order ? { playingOrder: order } : {}),
+    });
+
+    // keep the gapless engine's queue mirror aligned with the updated queue
+    dispatch.playerModel.playerSyncGaplessQueue();
+  },
+
   playerRepeatToggle(payload, rootState) {
     // console.log('%c--- playerRepeatToggle ---', 'color:#5c16b1');
     const currentService = rootState.appModel.currentService;
@@ -946,16 +1066,40 @@ const effects = (dispatch) => ({
     const playingShuffle = rootState.sessionModel.playingShuffle;
     const playingTrackIndex = rootState.sessionModel.playingTrackIndex;
     const playingTrackCount = rootState.sessionModel.playingTrackCount;
+    const playingTrackKeys = rootState.sessionModel.playingTrackKeys;
+    const playingTrackList = rootState.sessionModel.playingTrackList;
     const isShuffle = !playingShuffle;
 
-    const realIndex = rootState.sessionModel.playingTrackKeys[playingTrackIndex];
-    const trackKeys = getTrackKeys(playingTrackCount, playingOrder, isShuffle, realIndex);
-    const newIndex = trackKeys.indexOf(realIndex);
+    // Identify manual "Play next" entries (appended after source count).
+    const sourceCount = rootState.sessionModel.playingTrackSourceCount ?? playingTrackCount;
+    const extras = playingTrackKeys.filter((key) => key >= sourceCount);
+    const currentKey = playingTrackKeys[playingTrackIndex];
+    const currentIsExtra = currentKey >= sourceCount;
+
+    // Build source keys: shuffled or ordered source tracks.
+    const sourceTrackKeys = getTrackKeys(sourceCount, playingOrder, isShuffle, currentIsExtra ? null : currentKey);
+
+    // Build final keys: extras stay adjacent to the current track.
+    let newKeys;
+    let newIndex;
+
+    if (currentIsExtra) {
+      // Current is a manual entry: put extras first, then source keys.
+      newKeys = [...extras, ...sourceTrackKeys];
+      newIndex = newKeys.indexOf(currentKey);
+    } else {
+      // Current is a source track: find its position in the source keys,
+      // then splice extras after it.
+      const currentSourcePos = sourceTrackKeys.indexOf(currentKey);
+      newKeys = [...sourceTrackKeys];
+      newKeys.splice(currentSourcePos + 1, 0, ...extras);
+      newIndex = currentSourcePos;
+    }
 
     dispatch.sessionModel.setSessionState({
       playingShuffle: isShuffle,
       playingTrackIndex: newIndex,
-      playingTrackKeys: trackKeys,
+      playingTrackKeys: newKeys,
     });
 
     // Update the next track based on new order

@@ -470,6 +470,7 @@ const playingState = {
   playingTrackKeys: null,
   playingTrackList: null,
   playingTrackCount: null,
+  playingTrackSourceCount: null,
   playingTrackProgress: 0,
 
   playingRepeatAll: false,

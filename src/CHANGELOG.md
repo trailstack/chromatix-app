@@ -2,6 +2,7 @@
 
 Features:
 
+- Right-click any track and select "Play next" to queue it immediately after the current track. Multiple requests play most-recent-first.
 - Improved colours and readability across every theme, especially at higher contrast settings.
 - Buttons and other clickable elements now have clearer hover and keyboard focus states.
 - Disabled items now stay clearly disabled at every contrast setting.
